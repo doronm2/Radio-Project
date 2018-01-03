@@ -35,33 +35,51 @@ typedef struct {
 typedef struct {
     int socket;
     pthread_t client_thread;
+    struct TCP_DATA *next;
+    struct TCP_DATA *prev;
 }TCP_DATA;
 
-/***************************************Functions*****************/
-int close_connections(int client_Sock[100],pthread_t client_pid[100],int num_of_clients,UDP_DATA *root); //TODO - close all tcp and udp connections, return 0 if all is closed and -1 if failed
-void* handle_client(void* info); //TODO - client thread for each connection
-void* handle_station(void* my_details); //TODO - udp thread for each of the stations
-int check_new_song(UDP_DATA to_check); //TODO - check if there is a new station in the linked list, return 0 if there is
+typedef enum {
+    WELCOME,
+    ANNOUNCE,
+    PERMIT,
+    INVALID,
+    NEW
+}ANSWER;
 
+/***************************************Functions*****************/
+
+int close_connections(TCP_DATA *root_client,UDP_DATA *root_station); //TODO CHECK - close all tcp and udp connections, return 0 if all is closed and -1 if failed
+void* handle_client(void* data); //TODO - client thread for each connection
+void* handle_station(void* data); //TODO CHECK- udp thread for each of the stations
+int check_new_song(UDP_DATA *to_check); //TODO - check if there is a new station in the linked list, return 0 if there is
+int send_message(int socket,enum answer); //TODO -
+int remove_client(TCP_DATA *client); //TODO - close and delete the client, and reconnect the other linked list
+int open_new_station(UDP_DATA *last_station,UDP_DATA *new_station);//TODO - open a new UDP multicast with the data given.
 
 /****************** Server  ****************/
 
 int main(int argc, char* argv[])
 {
-	int client_Sock[100]={0};
-    pthread_t client_pid[100]={0};
     int welcomeSocket,tcp_port,udp_port,i=0,songs=0;
 	struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
     char *root_Multi_ip, *last_Multi_ip;
     socklen_t addr_size;
-    UDP_DATA* stations,*root;
-    TCP_DATA* client;
+    UDP_DATA* stations,*root_station;
+    TCP_DATA* client,*temp_client, *root_client;
 
-    client=calloc(1, sizeof(TCP_DATA)); //allocate the client tcp to send to the threads
+    if(argc<5) {
+        perror("not enough parameters to run the server\n\nSERVER EXIT");
+        return EXIT_FAILURE;
+    }
+    client=(TCP_DATA*)calloc(1, sizeof(TCP_DATA)); //allocate the client tcp to send to the threads
+    client->prev=NULL;
+    root_client=client;
 
-    stations=calloc(1, sizeof(UDP_DATA)); //allocate the stations udp for each udp multicast
-    root=stations;
+    stations=(UDP_DATA*)calloc(1, sizeof(UDP_DATA)); //allocate the stations udp for each udp multicast
+    root_station=stations;
+
     //memcpy(root,stations, sizeof(UDP_DATA)); //save the header of the stations
 
     tcp_port = atoi(argv[1]); //for the tcp port
@@ -69,13 +87,13 @@ int main(int argc, char* argv[])
     udp_port = atoi(argv[3]); //for the udp port
 
     root_Multi_ip = argv[2]; ///the initial multicast address
-    last_Multi_ip=calloc(1, sizeof(root_Multi_ip)+1);
+    last_Multi_ip=(char*)calloc(1, sizeof(root_Multi_ip)+1);
     memcpy(last_Multi_ip,root_Multi_ip,strlen(root_Multi_ip)+1);
 
     //***********Get and open a thread for each station*********//
-    for(songs=0;argv[songs]!=NULL;songs++){
+    for(songs=0;songs<(argc-4);songs++){
         if(songs!=0) {
-            stations->next = calloc(1, sizeof(UDP_DATA)); //allocate a new station
+            stations->next = (UDP_DATA*)calloc(1, sizeof(UDP_DATA)); //allocate a new station
             stations=stations->next;
         }
         stations->ip_address=last_Multi_ip;
@@ -113,17 +131,18 @@ int main(int argc, char* argv[])
 
     /*---- Accept call creates a new socket for the incoming connection ----*/
     addr_size = sizeof(serverStorage);
-    while(client_Sock[i] = accept(welcomeSocket, (struct sockaddr *)&serverStorage, &addr_size) && i<100) {
+    while(client->socket = accept(welcomeSocket, (struct sockaddr *)&serverStorage, &addr_size) && i<100) {
 
-        if (client_Sock[i] == -1) {
+        if (client->socket == -1) {
             perror("Error in accepting new client");
-            close(welcomeSocket);
+            close(client->socket);
             break;
         }
         else { printf("\naccepted new client. \n\n"); }
 
+        temp_client=calloc(1, sizeof(TCP_DATA));
+        client->next=temp_client;
         /*---- Accept call creates a new socket for the incoming connection ----*/
-        client->socket=client_Sock[1];
         if( pthread_create( &client->client_thread , NULL ,  handle_client , (void*)client) < 0)
         {
             perror("could not create thread");
@@ -131,21 +150,23 @@ int main(int argc, char* argv[])
         }
         else {
             printf("new thread created for client %d", i);
-            client_pid[i]=client->client_thread;
         }
         i++;
+        temp_client->prev=client;
+        client=temp_client;
     }
-    if(close_connections(client_Sock,client_pid,i,root)==0)
+    if(close_connections(root_client,root_station)==0)
         printf("successfully closed TCP and UDP Sockets and Threads");
 	// Wait for socket to have data, Read socket data into buffer if there is Any data
-
+    free(root_Multi_ip);
+    free(last_Multi_ip);
 	return EXIT_SUCCESS;
 }
 
 
 void* handle_station(void* data){
     UDP_DATA *my_data=(UDP_DATA*)data;
-    FILE * song_ptr, *reset_ptr;
+    FILE * song_ptr;
     int sock,i=0,bytes_sent=0,curr_sent=0, sent_err=0,j;
     char message[Buffer_size] = {0};
     u_char TTL =10;
@@ -167,7 +188,6 @@ void* handle_station(void* data){
 
     //try to open the text file to send
     song_ptr = fopen (my_data->song_name , "r");
-    memcpy(reset_ptr,song_ptr, sizeof(FILE));
     if(!song_ptr) {
         printf("couldn't open text file to send");
         close(sock);
@@ -180,7 +200,7 @@ void* handle_station(void* data){
     while (1) // if we got here, no errors occurred.
     {
         if((fscanf(song_ptr, "%1024c", message))==EOF){
-            song_ptr=reset_ptr;
+            reverse(song_ptr);
         }
         curr_sent = sendto(sock, message, sizeof(message), 0, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
         bytes_sent += curr_sent;
@@ -208,37 +228,47 @@ void* handle_station(void* data){
 }
 
 
-int close_connection(int client_Sock[100],pthread_t client_pid[100],int num_of_clients,UDP_DATA *root){
+int close_connection(TCP_DATA *root_client,UDP_DATA *root_station){
     UDP_DATA *temp;
     int i,Check;
     /********Close all tcp sockets and threads*********/
-    for(i=0;i<=num_of_clients;i++) {
-        Check = pthread_join(client_pid[i], NULL);        //wait for the threads to end
+    while(root_client->next!=NULL){
+        Check = pthread_join(root_client->client_thread, NULL);        //wait for the threads to end
         if (Check != 0) {
             perror("failed to close thread");
             exit(1);
         }
-        Check = close(client_Sock[i]);
+        temp=root_client->next;
+        free(root_client);
+        root_client=temp;
+
+        Check = close(root_client->socket);
         if (Check != 0) {
             perror("failed to close Socket");
             exit(1);
         }
     }
-    while(root->next!=NULL){
-        Check = pthread_join(root->station_thread, NULL);        //wait for the threads to end
+    free(temp);
+    while(root_station->next!=NULL){
+        Check = pthread_join(root_station->station_thread, NULL);        //wait for the threads to end
         if (Check != 0) {
             perror("failed to close thread");
             exit(1);
         }
-        temp=root->next;
-        free(root);
-        root=temp;
+        temp=root_station->next;
+        free(root_station);
+        root_station=temp;
     }
+    free(temp);
 }
 
 void* handle_client(void* data){
     TCP_DATA *my_data=(TCP_DATA*)data;
-    int i,
+    int i;
     char buffer[Buffer_size+1];
     uint8_t replyType = 0;
+    ANSWER type;
+    while(1){
+
+    }
 }
