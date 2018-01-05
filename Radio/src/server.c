@@ -4,7 +4,7 @@ ID: 307835249
 Author2: Doron Maman,
 ID: 302745146
  */
-
+#ifdef SERVER
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +46,7 @@ typedef enum {
     NEW
 }ANSWER;
 
+static int tests=150;
 /***************************************Functions*****************/
 
 int close_connections(TCP_DATA *root_client,UDP_DATA *root_station); //TODO CHECK - close all tcp and udp connections, return 0 if all is closed and -1 if failed
@@ -110,7 +111,7 @@ int main(int argc, char* argv[])
         stations->num_of_station=songs;
         stations->shutdown=0; // flag to inform a the thread to close
         stations->port=udp_port;
-        stations->song_name=argv[songs];
+        stations->song_name=argv[4+songs];
         if( pthread_create( &stations->station_thread , NULL ,  &handle_station , (void*)stations) < 0)
             perror("could not create thread");
     }
@@ -266,7 +267,7 @@ int close_connections(TCP_DATA *root_client,UDP_DATA *root_station){
             perror("failed to close thread");
             exit(1);
         }
-        temp=root_station->next;
+        temp= (UDP_DATA *) root_station->next;
         free(root_station);
         root_station=temp;
     }
@@ -284,3 +285,4 @@ void* handle_client(void* data){
 
     }
 }
+#endif
