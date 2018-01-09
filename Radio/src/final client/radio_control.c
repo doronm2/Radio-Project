@@ -95,7 +95,7 @@ int main(int argc, char* argv[]) // Input: SERVER's IP_address/NAME, SERVER's TC
 	//close the connection, free resources.
 	if(close(TCP_Sock) == -1 )
 	{ perror("Error in closing client socket"); exit(ERROR); }
-	while (UDP_closed == 0) {} //wait for thread to finish
+	//while (UDP_closed == 0) {} //wait for thread to finish
 	pthread_join(t, NULL);
 	return EXIT_SUCCESS;
 }
@@ -146,7 +146,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	if (retval == -1) { perror("select() failed in upsong"); state = OFF_INIT; }
 	else if(FD_ISSET(TCP_Sock, &rfds) && retval) //data ready from STDIN, while not in upload.
 	{
-		printf("\nWELCOME msg received from server! ");
+		printf("\nWelcome msg received from server! ");
 		state = WAIT_WELCOME;
 	}
 	else if(retval ==0) //timeout reached.
@@ -232,6 +232,7 @@ void* listener(void* UDP)
 
 	// Free all resources;
 	close(UDP_sock);
+	pclose(fp);
 	UDP_closed = 1;
 	pthread_exit(&t); //terminate thread.
 }
@@ -319,7 +320,7 @@ int handle_user_input()
 			rewind(songP); // return the pointer back to start of file
 			if(song_size > MIN_SONG_SIZE && song_size < MAX_SONG_SIZE) // good size
 			{
-				printf("file size to upload is: %d bytes.\n",song_size);
+				//printf("file size to upload is: %d bytes.\n",song_size); //only for us to be sure.
 				upSong_msg = (char*)calloc(1,(Song_name_size+6)*sizeof(char)); //+6 for command type, song size, and song name size.
 				//fill upSong buffer
 				upSong_msg[0] = (uint8_t)2; //command type = 0
@@ -342,6 +343,7 @@ int handle_user_input()
 
 				fileSize = song_size/Buffer_size +1; //calc how many iterations to send full song.
 				remeinder = song_size-(fileSize-1)*Buffer_size; // (doesn't send last part if remeinder == 0)
+				fclose(songP);
 				return 1;
 			}
 			else //improper file
@@ -355,6 +357,7 @@ int handle_user_input()
 		{
 			perror("file doesn't exist, or is not readable. try again");
 			fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit, then press Enter.\n", NumStations-1);
+			fclose(songP);
 			return SUCCESS; //func still successful
 		}
 	}
@@ -474,7 +477,7 @@ int handle_TCP_message()
 			break;
 
 		default : //	InvalidCommand or announce msg - check which one and handle accordingly
-			printf("bad message from server. quitting program =(");
+			printf("bad message from server. quitting program =( ");
 			state = OFF_INIT;
 			return ERROR;
 		}
@@ -525,9 +528,9 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 			usleep(usec_delay); //delay sending by 8000 usec
 		}
 	}
+	fclose(song);
 	if((fscanf(song, "%1024c", song_buff))==EOF && !server_is_idiot) //EOF reached. expecting newStations msg.
 	{
-		fclose(song);
 		state = WAIT_NEW_STATIONS;
 		FD_ZERO(&rfds);
 		FD_SET(TCP_Sock, &rfds);
@@ -564,7 +567,6 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 			state = OFF_INIT;
 		}
 	}
-
 	else if (server_is_idiot)
 	{ free(song_file); return SUCCESS; }
 
