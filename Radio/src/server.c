@@ -19,7 +19,7 @@ ID: 302745146
 #include <pthread.h>
 
 #define Buffer_size 	1024
-#define C2S_Buffer
+#define DEBUG_MODE      1
 /***************************************Structs*****************/
 
 struct UDP_DATA{
@@ -35,6 +35,9 @@ struct UDP_DATA{
 struct TCP_DATA{
 	int socket;
 	int client_index;
+	char *clientIP;
+    int active;
+    int station_num;
 	pthread_t client_thread;
 };
 
@@ -42,7 +45,6 @@ struct TCP_DATA{
 #define 	HELLO 			0
 #define 	ASKSONG			1
 #define 	UPSONG  		2
-#define     INVALID         10
 
 typedef enum {
 	WELCOME,
@@ -53,12 +55,11 @@ typedef enum {
 }SERVER_RESPONSE;
 
 static int END_SERVER=0;
-static int Client_List[100][4];  //the list is {socket,thread,station name,active(1 for active, 0 for inactive)}
+static struct TCP_DATA Client_List[100];  //the list is {socket,thread,station name,active(1 for active, 0 for inactive)}
 static int NUM_OF_STATIONS=0;
 static int DOWNLOAD_SONG=0; //0- no song is uploading, 1- a song is uploading, 2 - a song has uploaded
 static int UDP_PORT=0;
 static int MultiCastIP[4]={0};
-static char* ROOT_IP;
 static uint32_t MIN_SONG_SIZE=2000;
 static uint32_t MAX_SONG_SIZE=10000000;
 struct UDP_DATA *ROOT_ST;
@@ -69,9 +70,11 @@ void* handle_client(void* data); //TODO - client thread for each connection
 void* handle_station(void* data); //TODO CHECK- udp thread for each of the stations
 int check_new_song(char* song_name,int song_len); //TODO - check if there is a new station in the linked list, return 0 if there is
 int open_new_station(char* song_name);//TODO - open a new UDP multicast with the data given.
-int download_song(char* song_name,int song_len,int socket);//TODO - build a function to receive the song from the client
+int download_song(char* song_name,ssize_t  song_len,int socket);//TODO - build a function to receive the song from the client
 int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str);
 char* find_song(int channel);
+void print_server_data();
+void print_clients_station();
 
 /****************** Server  ****************/
 //TODO - add select() to chose between IO and WelocomeSocket data
@@ -79,28 +82,36 @@ char* find_song(int channel);
 int main(int argc, char* argv[])
 {
 	int welcomeSocket,tcp_port,udp_port,i=0,client_ind=0;
-	int temp,j=0,reuse=1,retval;
+	int temp,j=0,reuse=1,retval,print_welcome=0;
 	struct sockaddr_in serverAddr;
 	struct sockaddr_storage serverStorage;
 	char *root_Multi_ip;
+	char serverIO;
 	socklen_t addr_size;
 	struct UDP_DATA *stations, *temp_station;
 	struct TCP_DATA *client;
 	fd_set rfds;
-
+	struct sockaddr_in* pV4Addr;
+	struct in_addr ipAddr;
+    struct timeval tv;
 	if(argc<2) {
 		perror("not enough parameters to run the server\n\nSERVER EXIT");
 		return EXIT_FAILURE;
 	}
-	else
+	else if(DEBUG_MODE==1)
 		printf("input received: \nexe File:%s, TCP port:%s,\nMulticast IP:%s"
 				", UDP port:%s, song no.1:%s.\n(total of %d args)\n"
 				, argv[0], argv[1], argv[2], argv[3] ,argv[4], argc);
 	client=(struct TCP_DATA*)calloc(1, sizeof(struct TCP_DATA)); //allocate the client tcp to send to the threads
 
 	for(client_ind=0;client_ind<100;client_ind++)
-		for(i=0;i<4;i++)
-			Client_List[client_ind][i]=0; //init the client list
+		{
+            Client_List[client_ind].client_index=0;
+            Client_List[client_ind].active=0;
+            Client_List[client_ind].station_num=0;
+            Client_List[client_ind].clientIP=NULL;
+        }
+			 //init the client list
 	client_ind=0;
 
 	stations=(struct UDP_DATA*)calloc(1, sizeof(struct UDP_DATA)); //allocate the stations udp for each udp multicast
@@ -112,11 +123,10 @@ int main(int argc, char* argv[])
 	UDP_PORT=udp_port;
 
 	root_Multi_ip = argv[2]; ///the initial multicast address
-	ROOT_IP=argv[2];
 	for(i=0, j=0 ; i<4 ; i++){//copy the ip to int array
 		MultiCastIP[i] = 0;
 		for(; j<(argv[3]-argv[2]-1) && argv[2][j]!='.' ; j++){
-			temp=(int)(argv[2][j]-48);
+			temp=(argv[2][j]-48);
 			MultiCastIP[i] = MultiCastIP[i]*10 +temp;
 		}
 		j++;
@@ -151,7 +161,8 @@ int main(int argc, char* argv[])
 	serverAddr.sin_port = htons((uint16_t )tcp_port); 	/* Set port number, using htons function to use proper byte order */
 	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY); /* Set IP address to localhost */
 	memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero); 	/* Set all bits of the padding field to 0 */
-
+    tv.tv_sec=2;
+    tv.tv_usec=0; //TODO - check timeout value
 
 	/*---- Bind the address struct to the socket ----*/
 	setsockopt(welcomeSocket, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
@@ -168,17 +179,21 @@ int main(int argc, char* argv[])
 	/*---- Accept call creates a new socket for the incoming connection ----*/
 	addr_size = sizeof(serverStorage);
 	while(END_SERVER==0) {
-		FD_ZERO(&rfds);
+		if(print_welcome==0){
+            print_welcome=1;
+            printf("\n\n*******Welcome to Radio Server!***********"
+                           "\nTo print the Server data press 'p'\nTo exit the program, press 'q'\n\n\n");
+        }
+        FD_ZERO(&rfds);
 		FD_SET(welcomeSocket, &rfds);
-		FD_SET(0, &rfds); //rfds[0] = STDIN_FILENO (0). set rfds
+		FD_SET(STDIN_FILENO, &rfds); //rfds[0] = STDIN_FILENO (0). set rfds
 		retval = select(welcomeSocket+1, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
-		if(FS_ISSET(welcomeSocket, &rfds)){
-			client->socket = accept(welcomeSocket, (struct sockaddr *)&serverStorage, &addr_size)
+		if(FD_ISSET(welcomeSocket, &rfds)){
+			client->socket = accept(welcomeSocket, (struct sockaddr *)&serverStorage, &addr_size);
 						if (retval == -1) //error in select
 							perror("select() error");
-
 			for(client_ind=0;client_ind<100;client_ind++)
-				if(Client_List[client_ind][3]==0)
+				if(Client_List[client_ind].active==0)
 					break;
 			if(client_ind==100) {
 				perror("Server unable to connect new clients");
@@ -191,6 +206,13 @@ int main(int argc, char* argv[])
 			}
 			else { printf("\naccepted new client. \n\n"); }
 
+			//****get the client IP****//
+			pV4Addr = (struct sockaddr_in*)&serverStorage;
+			ipAddr = pV4Addr->sin_addr;
+            client->clientIP=calloc(INET_ADDRSTRLEN, sizeof(char));
+			inet_ntop( AF_INET, &ipAddr.s_addr,client->clientIP, INET_ADDRSTRLEN );
+            if(DEBUG_MODE==1)
+                printf("new Client IP %s\n",client->clientIP);
 			client->client_index=client_ind;
 			/*---- Accept call creates a new socket for the incoming connection ----*/
 			if( pthread_create( &client->client_thread , NULL ,  handle_client , (void*)client) < 0)
@@ -199,17 +221,49 @@ int main(int argc, char* argv[])
 				close(client->socket);
 			}
 			else {
-				printf("new thread created for client %d", client_ind);
+				fflush(stdout);
+                printf("new thread created for client %d", client_ind);
 			}
 			i++;
 			//fill the client list for management;
-			Client_List[client_ind][0]=client->socket;
-			Client_List[client_ind][1]= (int) client->client_thread;
-			Client_List[client_ind][3]=1;
+			Client_List[client_ind].clientIP=(char*)calloc(1, sizeof(client->clientIP));
+            strcpy(Client_List[client_ind].clientIP,client->clientIP);
+			Client_List[client_ind].client_thread=client->client_thread;
+			Client_List[client_ind].client_index=client_ind; //each station starts on station 0
+            Client_List[client_ind].active=1; //mark as active station
+            Client_List[client_ind].station_num=0; //each station starts on station 0
+            Client_List[client_ind].socket=client->socket;
+
+			free(client->clientIP);
 
 		}
 		else if(FD_ISSET(STDIN_FILENO,&rfds)){
-			//TODO - IO input
+			scanf("%c",&serverIO);
+            print_welcome=0;
+            switch (serverIO){
+                case 'p': // print all stations and clients
+                    print_server_data();
+                    print_clients_station();
+                    break;
+                case 'q': // quit the program
+                    END_SERVER=1;
+                    break;
+                default:
+                    perror("wrong Input, please try again");
+                    break;
+            }
+		}
+		if(DOWNLOAD_SONG==2){
+			while(stations->next!=NULL)
+                stations=stations->next;
+            if(stations->num_of_station==NUM_OF_STATIONS){
+                NUM_OF_STATIONS++;
+                for(i=0;i<100;i++) //ANNOUNCE to all clients on new station!
+                    if(Client_List[i].active==1)
+                        send_message(Client_List[i].socket,NEW_STATION,NUM_OF_STATIONS,NULL);
+                DOWNLOAD_SONG=0;
+            }
+
 		}
 	}
 	if(close_connections(ROOT_ST)==0)
@@ -292,6 +346,8 @@ void* handle_station(void* data){
 	fclose(song_ptr);
 	shutdown(sock, SHUT_RDWR);
 	close(sock);
+	free(Multicast_IP);
+    free(my_data->song_name);
 	pthread_exit((void *) my_data->station_thread);
 }
 
@@ -307,18 +363,20 @@ int close_connections(struct UDP_DATA *root_station){
 	int Check,index=0;
 	/********Close all tcp sockets and threads*********/
 	for(index=0;index<100;index++){
-		if(Client_List[index][3]==1) {
-			Check = pthread_join((pthread_t) Client_List[index][1], NULL);
+		if(Client_List[index].active==1) {
+            free(Client_List[index].clientIP);
+            Check = pthread_join((pthread_t) Client_List[index].client_thread, NULL);
 			//wait for the threads to end
 			if (Check != 0) {
 				perror("failed to close thread");
 				exit(1);
 			}
-			Check = close(Client_List[index][0]);
+			Check = close(Client_List[index].socket);
 			if (Check != 0) {
 				perror("failed to close Socket");
 				exit(1);
 			}
+			Client_List[index].active=0;
 		}
 	}
 	while(root_station->next!=NULL){
@@ -327,7 +385,7 @@ int close_connections(struct UDP_DATA *root_station){
 			perror("failed to close thread");
 			exit(1);
 		}
-		temp= (struct UDP_DATA *) root_station->next;
+		temp=root_station->next;
 		free(root_station);
 		root_station=temp;
 	}
@@ -353,9 +411,10 @@ void* handle_client(void* data){ //TODO - check timeouts
 	uint8_t commandType = 0,song_name_len;
 	uint16_t client_data;
 	uint32_t song_size;
+    fd_set readfd;
 
 	while(END_SERVER==0 && msg_err==0){
-		msg_len= (int) recv(my_data->socket, buffer, Buffer_size , 0);
+        msg_len= (int) recv(my_data->socket, buffer, Buffer_size , 0);
 		if(msg_len>0){
 			commandType=(uint8_t )buffer[0];
 			switch (commandType) {
@@ -387,7 +446,8 @@ void* handle_client(void* data){ //TODO - check timeouts
 					if((client_data>=0 && client_data<NUM_OF_STATIONS)){
 						song_name=find_song(client_data);
 						send_message(my_data->socket,ANNOUNCE,sizeof(song_name)+2,song_name);
-					}
+                        Client_List[my_data->client_index].station_num=client_data; //change station number
+                    }
 					else {
 						//send an invalid command to the client
 						send_message(my_data->socket, INVALID_MSG,46,"Client asked for a station hat doesn't exist\0");
@@ -415,33 +475,34 @@ void* handle_client(void* data){ //TODO - check timeouts
 					i = 0;
 					for (i = 0; i < song_name_len; i++)
 						song_name[i] = buffer[6 + i]; //copy the song name to the song name buffer
-						cmp_str=strstr(song_name,ending); //check that the name has "mp3" in it
-						if(cmp_str==NULL){
-							//send an invalid command to the client
-							send_message(my_data->socket, INVALID_MSG,22,"Song name isn't .mp3\0");
-							msg_err = 1;//there is a error with the message - close connection
-						}
-						else{
-							check_song=check_new_song(song_name,song_name_len); //check that the song isn't playing already
-							if (check_song == 0) {
-								send_message(my_data->socket, PERMIT,0,NULL); //permit the client to upload the song
-								//upload te song to the server
-								check_upload = download_song(song_name, song_size, my_data->socket);
-								if (check_upload == -1) {
-									send_message(my_data->socket, INVALID_MSG, 28, "Problem Uploading song\0");
-									msg_err = 1;
-								}
-								else {
-									if(open_new_station(song_name)==-1){}//TODO - check if necessary
-								}
+                    cmp_str=strstr(song_name,ending); //check that the name has "mp3" in it
+                    if(cmp_str==NULL){
+                        //send an invalid command to the client
+                        send_message(my_data->socket, INVALID_MSG,22,"Song name isn't .mp3\0");
+                        msg_err = 1;//there is a error with the message - close connection
+                    }
+                    else{
+                        check_song=check_new_song(song_name,song_name_len); //check that the song isn't playing already
+                        if (check_song == 0) {
+                            send_message(my_data->socket, PERMIT,0,NULL); //permit the client to upload the song
+                            //upload te song to the server
+                            check_upload = download_song(song_name, song_size, my_data->socket);
+                            if (check_upload == -1) {
+                                send_message(my_data->socket, INVALID_MSG, 28, "Problem Uploading song\0");
+                                msg_err = 1;
+                            }
+                            else {
+                                if(open_new_station(song_name)==-1){}//TODO - check if necessary
+                            }
 
-							}
-							else{
-								send_message(my_data->socket, INVALID_MSG, 15, "Station Exist\0");
-								msg_err = 1;
+                        }
+                        else{
+                            send_message(my_data->socket, INVALID_MSG, 15, "Station Exist\0");
+                            msg_err = 1;
 
-							}
-						}
+                        }
+                    }
+					free(song_name);
 				}
 
 				break;
@@ -458,7 +519,9 @@ void* handle_client(void* data){ //TODO - check timeouts
 		perror("failed to close Socket");
 		exit(1);
 	}
-	pthread_exit(&(my_data->client_thread));
+    Client_List[my_data->client_index].active=0; //mark as inactive
+    free(my_data->clientIP);
+    pthread_exit(&(my_data->client_thread));
 
 }
 
@@ -488,12 +551,11 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
 		buffer[2]=(uint8_t)(NUM_OF_STATIONS&0x00FF);
 		//Multicast Group - 4 Bytes
 		for(index=0;index<4;index++)
-			buffer[3+index]=MultiCastIP[3-index];
+			buffer[3+index]= (unsigned char) MultiCastIP[3 - index];
 		//Port Number - 2 Bytes
 		buffer[7]=(uint8_t)(UDP_PORT&0xFF00)>>8;
 		buffer[8]=(uint8_t)(UDP_PORT&0x00FF);
 		msg_len=9;
-		printf("send WELCOME %s/n/n",buffer);
 		break;
 	case ANNOUNCE:
 		ReplyType=1;
@@ -505,7 +567,6 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
 		for (index = 0; index < str_len; index++)
 			buffer[2+index]=(uint8_t )reply_str[index];
 		msg_len=2+str_len;
-		printf("send ANNOUNCE %s/n/n",buffer);
 		break;
 	case PERMIT:
 		ReplyType=2;
@@ -514,7 +575,6 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
 		//Song Name Size - 1 Byte
 		buffer[1]=(uint8_t)1; //1 equals Permit
 		msg_len=2;
-		printf("send PERMIT %s/n/n",buffer);
 		break;
 	case NEW_STATION:
 		ReplyType=4;
@@ -524,7 +584,8 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
 		buffer[1]=(uint8_t)((str_len&0xFF00)>>8);
 		buffer[2]=(uint8_t)(str_len&0x00FF);
 		msg_len=3;
-		printf("send NEW %s/n/n",buffer);
+        if(DEBUG_MODE==1)
+		    printf("send NEW %s\n\n",buffer);
 		break;
 	case INVALID_MSG:
 		ReplyType=3;
@@ -536,11 +597,9 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
 		for (index = 0; index < str_len+2; index++)
 			buffer[2+index]=(uint8_t )reply_str[index];
 		msg_len=2+str_len;
-		printf("send INVALID %s/n/n",buffer);
 		break;
 	}
 	//Send the message
-	printf("message to send %s/n/n",buffer);
 	if(send(socket,buffer,msg_len*sizeof(char),0) == -1) {
 		perror("Error in sending Message\n\n");
 		return -1;
@@ -561,15 +620,15 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
  * 3.the upload size is not as given in song_len
  * 4.other Client is Uploading a song
  */
-int download_song(char* song_name,int song_len,int socket){
-	ssize_t checkUp=0,packet_ctr=0,count_size=0;
+int download_song(char* song_name,ssize_t song_len,int socket){
+	ssize_t checkUp=1,packet_ctr=0,count_size=0;
 	FILE* song_fd;
 	int ret=0;
 	char buffer[Buffer_size];
 	struct timeval tv;
 	tv.tv_sec = 3; //3 seconds timeout as defined
 	tv.tv_usec = 0;
-
+    fd_set readfd;
 	//set timeout for upload at 3 seconds
 	setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv,sizeof(struct timeval));
 	song_fd=fopen(song_name,"w+"); //open the *mp3 file to write to
@@ -588,11 +647,17 @@ int download_song(char* song_name,int song_len,int socket){
 		goto END;
 	}
 	//start receiving the song from the Client
-	while((checkUp=recv(socket,buffer, sizeof(buffer),0))>0) {
-		count_size+=checkUp;
-		packet_ctr++;
-		fwrite(buffer,1,sizeof(buffer),song_fd);//write the song to the file
-	}
+	while(checkUp>0) {
+        FD_ZERO(&readfd);
+        FD_SET(socket,&readfd);
+        if(FD_ISSET(socket,&readfd)){
+            if((checkUp=recv(socket,buffer, sizeof(buffer),0))>0){
+                count_size+=checkUp;
+                packet_ctr++;
+                fwrite(buffer,1,sizeof(buffer),song_fd);//write the song to the file
+            }
+        }
+    }
 	memset(buffer, '\0', sizeof(buffer));
 	if(checkUp<0 && packet_ctr==0){
 		perror("Download timeout");
@@ -601,11 +666,13 @@ int download_song(char* song_name,int song_len,int socket){
 		goto END;
 	}
 	else if(count_size==song_len) { //reached EOF, upload completed
-		printf("Download complete");
+		fflush(stdout);
+        printf("Download complete\n\n");
 	}
 	else{
 		perror("Download failed");
-		DOWNLOAD_SONG=0;  //reset the upload flag
+		printf( "\nExpected Size %lu , given Size %lu\n",song_len,count_size);
+        DOWNLOAD_SONG=0;  //reset the upload flag
 		ret= -1;
 		goto END;
 	}
@@ -684,4 +751,42 @@ char* find_song(int channel){
 		res=temp->song_name;
 	return res;
 }
+
+void print_server_data(){
+    int i;
+    struct UDP_DATA *temp=ROOT_ST;
+    printf("Server Stations list:\n\n");
+    for(i=0;i<NUM_OF_STATIONS;i++)
+        printf("Station %d is playing on Multicast %d.%d.%d.%d\nSong playing %s\n"
+                ,i,temp->ip_address[0],temp->ip_address[1],temp->ip_address[2]
+                ,temp->ip_address[3],temp->song_name);
+    for(i=0;i<100;i++) {
+        if (Client_List[i].active == 1)
+            printf("Client %d with ip adrress: %s\n",Client_List[i].client_index
+                    ,Client_List[i].clientIP);
+    }
+}
+
+void print_clients_station() {
+    int i, j,client_on=0;
+    struct UDP_DATA *temp = ROOT_ST;
+    printf("Server Stations list with Clients listening:\n\n");
+    for (i = 0; i < NUM_OF_STATIONS; i++) {
+        printf("Station %d is playing on Multicast %d.%d.%d.%d\nSong playing %s\n", i, temp->ip_address[0],
+               temp->ip_address[1], temp->ip_address[2], temp->ip_address[3], temp->song_name);
+        printf("Clients on the Station:\n");
+        client_on=0;
+        for (j = 0; j < 100; j++) {
+            if (Client_List[j].active == 1 && Client_List[j].station_num == i) {
+                client_on++;
+                printf("Client %d, with IP address %s\n", Client_List[i].client_index, Client_List[i].clientIP);
+            }
+        }
+        if (client_on == 0)
+            printf("No Clients listenning to the station\n");
+        if(temp->next!=NULL)
+            temp=temp->next;
+    }
+}
+
 #endif
