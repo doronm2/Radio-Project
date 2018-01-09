@@ -35,7 +35,8 @@ ID: 302745146
 #define 	SUCCESS					1
 #define 	upload_delay			8000 //set the upload rate at the client to 1KiB every 8000 usec.
 #define 	kiB						1024
-#define 	max_num_stations			65535
+#define 	max_num_stations		65535
+#define 	max_uInput_len			100
 
 #define 	server_is_idiot			1
 
@@ -45,7 +46,7 @@ int state=0, upload=0, UDP_closed =0, change_station=0, current_station=0,remein
 unsigned short NumStations =0;
 int uploading = 0;
 char * song_file ,* group;
-char user_input [50] = {0};
+char user_input [max_uInput_len] = {0};
 long fileSize = 0;
 pthread_t t;
 struct timeval tv;
@@ -100,7 +101,7 @@ int main(int argc, char* argv[]) // Input: SERVER's IP_address/NAME, SERVER's TC
 
 UDP_sock_data handShake()
 {
-	UDP_sock_data welc_msg = {0};
+	UDP_sock_data welc_msg;
 	int rec_bytes = 0, retval=0;
 	unsigned char hello_msg [3] = {0,0,0} , welc_buff [9];
 
@@ -213,16 +214,15 @@ void* listener(void* UDP)
 int handle_user_input()
 {
 	int Song_name_size,song_size,i=1;
-	unsigned char askSong_msg [3] = {1,0,0};
+	char askSong_msg [3] = {1,0,0};
 	char* upSong_msg;
-	uint16_t var = 0;
 	FILE * songP;
 	DIR *d;
 	struct dirent *dir;
 
 	if(strcmp(user_input, "s")==0 || strcmp(user_input, "S")==0) //upload procedure
 	{
-		printf("please enter your desired song's name to upload (up to 50 characters, including suffix '.mp3').\n");
+		printf("please enter your desired song's name to upload (up to %d characters, including suffix '.mp3').\n",max_uInput_len);
 		printf("your song upload options:");
 		d = opendir(".");
 		if (d)
@@ -288,7 +288,7 @@ int handle_user_input()
 		else //song doesn't exist or not readable.
 		{
 			perror("file doesn't exist, or is not readable. try again");
-			fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit.\n", NumStations-1);
+			fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit, then press Enter.\n", NumStations-1);
 			return SUCCESS;
 		}
 	}
@@ -305,8 +305,7 @@ int handle_user_input()
 		}
 		else if ((uint16_t)atoi(user_input) < NumStations)//entered a good number
 		{
-			//todo
-			askSong_msg[2] = (uint16_t)atoi(user_input); //insert requested station number to upSong msg
+			*(uint16_t*)&askSong_msg[1] = htons(atoi(user_input)); //insert requested station number to upSong msg
 			current_station = (int)atoi(user_input);
 			if(send(TCP_Sock,askSong_msg,sizeof(askSong_msg),0) == -1)
 			{ perror(""); printf("\nError in sending askSong message");}
@@ -355,7 +354,7 @@ void handle_TCP_and_IO()
 {
 	int retval=0,i=0;
 
-	fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit.\n", NumStations-1);
+	fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit, then press Enter.\n", NumStations-1);
 	while(state != OFF_INIT) //no problem occurred and user doesn't want to quit.
 	{
 		FD_ZERO(&rfds); //reset file descriptor reader
@@ -374,7 +373,7 @@ void handle_TCP_and_IO()
 				fflush(stdin); //clean input buffer
 				gets(user_input);
 				handle_user_input(TCP_Sock);
-				for(i=0;i<50;i++) //clean user input buffer for next time
+				for(i=0;i<max_uInput_len;i++) //clean user input buffer for next time
 					user_input [i]=0;
 			}
 			if (FD_ISSET(TCP_Sock, &rfds) && (state != WAIT_NEW_STATIONS)) //data ready from TCP socket, while not waiting for newstations msg
@@ -383,7 +382,7 @@ void handle_TCP_and_IO()
 					msg_sent = 0;
 				handle_TCP_message(TCP_Sock);
 				if (state != OFF_INIT) //still online
-					fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit.\n", NumStations-1);
+					fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit, then press Enter.\n", NumStations-1);
 			}
 		}
 		if(retval==0 && msg_sent == 1) //timeout reached when sending message. quit.
@@ -519,7 +518,7 @@ int uploadSong() //, int parts, char* song_file, int song_size)  	//UPLOAD THE S
 
 	while (fscanf(song, "%1024c", song_buff) != EOF && state != OFF_INIT && i < fileSize)
 	{
-		printf("file Uploading status: %.0f%% \r",percent);
+		printf("Song Uploading status: %.0f%% \r",percent);
 		fflush(stdout);
 		if (i == fileSize - 1 && remeinder != 0) //UPLOAD LAST PART
 		{
@@ -527,7 +526,7 @@ int uploadSong() //, int parts, char* song_file, int song_size)  	//UPLOAD THE S
 			{ perror(""); printf("\nError in uploading last part"); state = OFF_INIT; }
 			else
 			{
-				printf("file Uploading status: 100%%. ");
+				printf("Song Uploading status: 100%%. ");
 				printf("finished song uploading!!\n");
 			}
 		}
