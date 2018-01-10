@@ -185,7 +185,7 @@ void* listener(void* UDP)
     struct timeval timeout;
 
 	UDP_sock = socket(AF_INET, SOCK_DGRAM, 0); //create udp sock
-	if (UDP_sock == -1) { perror("Can't create UDP socket"); close(UDP_sock); exit(ERROR); }
+	if (UDP_sock == -1) { perror("Can't create UDP socket"); close(UDP_sock); pthread_exit(&t); exit(ERROR); }
 
 	//define the port and the multicast IP to send the data on
 	udp_serverAddr.sin_family = AF_INET;
@@ -196,7 +196,7 @@ void* listener(void* UDP)
 	setsockopt(UDP_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse)); //reuse udp sock.
 	//try to bind to the the UDP socket of the multicast Group
 	if(bind(UDP_sock, (struct sockaddr *) &udp_serverAddr, sizeof(udp_serverAddr))==-1)
-	{ perror("Can't bind UDP socket"); close(UDP_sock); exit(ERROR); }
+	{ perror("Can't bind UDP socket"); close(UDP_sock); pthread_exit(&t); exit(ERROR); }
 
 	mreq.imr_multiaddr.s_addr = inet_addr(inet_ntoa(reference_mCast_addr));
 	mreq.imr_interface.s_addr = htonl(INADDR_ANY);
