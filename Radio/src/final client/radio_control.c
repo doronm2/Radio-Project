@@ -94,7 +94,7 @@ int main(int argc, char* argv[]) // Input: SERVER's IP_address/NAME, SERVER's TC
 
 	//close the connection, free resources.
 	if(close(TCP_Sock) == -1 )
-	{ perror("Error in closing client socket"); exit(ERROR); }
+	{ perror("Error in closing client TCP socket"); exit(ERROR); }
 	//while (UDP_closed != 1) {} //wait for thread to finish
 	pthread_join(t, NULL);
 	return EXIT_SUCCESS;
@@ -116,7 +116,7 @@ UDP_sock_data setTCP_sock (char* serv_ip, int serv_port)
 
 	/*---- Connect the socket to the server using the address struct ----*/
 	if(connect(TCP_Sock, (struct sockaddr *) &serverAddr, sizeof(serverAddr))== -1)
-	{ perror("Can't connect to server"); close(TCP_Sock); exit(ERROR); }
+	{ perror("TCP Can't connect to server"); close(TCP_Sock); exit(ERROR); }
 
 	udp_data = handShake(TCP_Sock); //handshake with server, get relevant data from it.
 	if(strcmp(udp_data.mGroup_IP,"000000000000000") == 0 && udp_data.mGroup_port== 0) //no real data received
@@ -182,6 +182,7 @@ void* listener(void* UDP)
 	char  message[Buffer_size];
 	FILE * fp; //to throw audio to
 	socklen_t addr_len;
+    struct timeval timeout;
 
 	UDP_sock = socket(AF_INET, SOCK_DGRAM, 0); //create udp sock
 	if (UDP_sock == -1) { perror("Can't create UDP socket"); close(UDP_sock); exit(ERROR); }
@@ -214,11 +215,15 @@ void* listener(void* UDP)
 			setsockopt(UDP_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)); //join mGroup
 			change_station = 0; //now changed.
 		}
+	    timeout.tv_sec = 2;
+	    timeout.tv_usec = 0;
+	    if (setsockopt (UDP_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
+	    	{ perror("setsockopt failed\n"); state = OFF_INIT; break; }
 		UDP_pack_len = recvfrom(UDP_sock, message, sizeof(message), 0, (struct sockaddr *) &udp_serverAddr, &addr_len); //receive song
 		if(UDP_pack_len > 0)
 			fwrite (message , sizeof(char), Buffer_size, fp); //write a buffer of size Buffer_size into fp >> play  the song!!
 		if (UDP_pack_len < 0)
-		{ perror("Error in reading from socket"); printf("\n"); }
+		{ perror("Error in reading from UDP socket"); printf("\n"); }
 		else if (UDP_pack_len == 0)// - Connection closed by server
 		{
 			printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~~~UDP Connection closed by server.~~~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
@@ -230,8 +235,9 @@ void* listener(void* UDP)
 	setsockopt(UDP_sock, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq, sizeof(mreq)); //DROP mGroup MEMBERSHIP
 	printf("closing streaming communication! Bye bye!\n");
 
-	// Free all resources;
-	close(UDP_sock);
+	// Free all resources; close the connection
+	if(close(UDP_sock) == -1 )
+	{ perror("Error in closing client UDP socket"); exit(ERROR); }
 	pclose(fp);
 	pthread_exit(&t); //terminate thread.
 }
@@ -499,6 +505,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 	FILE * song;
 	useconds_t usec_delay = upload_delay; //8000 usec
 	uint8_t replyType = 0;
+	struct timeval timeout;
 
 	song = fopen(song_file,"r"); //try to read song file
 	if(!song)  //can't open file
@@ -508,20 +515,49 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 	{
 		printf("Song Uploading status: %.0f%% \r",percent); //show upload precentage
 		fflush(stdout);
+	    timeout.tv_sec = 1;
+	    timeout.tv_usec = 0;
+	    if (setsockopt (TCP_Sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
+	        {
+	    	perror("setsockopt failed\n"); state = OFF_INIT;
+	        free(song_file);
+			fclose(song);
+			break;
+	        }
+
 		if (part_num == fileSize - 1 && remeinder != 0) //UPLOAD LAST PART
 		{
-			if(send(TCP_Sock,song_buff,remeinder,0) == -1)
+			TCP_pack_len = send(TCP_Sock,song_buff,remeinder,0);
+			if(TCP_pack_len == -1)
 			{ perror(""); printf("\nError in uploading last part"); state = OFF_INIT; }
+			else if (TCP_pack_len == 0)
+			{
+				printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~TCP Connection closed by server.~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+				state = OFF_INIT;
+				free(song_file);
+				fclose(song);
+				break;
+			}
 			else
 			{
 				printf("Song Uploading status: 100%%. ");
 				printf("finished song uploading!!\n");
 			}
+
 		}
 		else //upload all other parts.
 		{
-			if(send(TCP_Sock,song_buff,Buffer_size,0) == -1)
+			TCP_pack_len = send(TCP_Sock,song_buff,Buffer_size,0);
+			if(TCP_pack_len == -1)
 			{ perror(""); printf("\nError in uploading song"); state = OFF_INIT; break;}
+			else if (TCP_pack_len == 0)
+			{
+				printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~TCP Connection closed by server.~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+				state = OFF_INIT;
+				free(song_file);
+				fclose(song);
+				break;
+			}
 			percent = (part_num++)*100/fileSize; //increment percentage
 			usleep(usec_delay); //delay sending by 8000 usec
 		}
