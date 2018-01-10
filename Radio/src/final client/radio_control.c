@@ -43,7 +43,7 @@ ID: 302745146
 
 
 //global variables
-int state=0, upload=0, UDP_closed =0, change_station=0, current_station=0,remeinder=0 , TCP_Sock = 0 ,msg_sent = 0 ,multicastGroup;
+int state=0, upload=0, change_station=0, current_station=0,remeinder=0 , TCP_Sock = 0 ,msg_sent = 0 ,multicastGroup;
 unsigned short NumStations =0;
 int uploading = 0; //to indicate we are in upload process
 char * song_file; //uploaded song file name
@@ -95,7 +95,7 @@ int main(int argc, char* argv[]) // Input: SERVER's IP_address/NAME, SERVER's TC
 	//close the connection, free resources.
 	if(close(TCP_Sock) == -1 )
 	{ perror("Error in closing client socket"); exit(ERROR); }
-	//while (UDP_closed == 0) {} //wait for thread to finish
+	//while (UDP_closed != 1) {} //wait for thread to finish
 	pthread_join(t, NULL);
 	return EXIT_SUCCESS;
 }
@@ -233,7 +233,6 @@ void* listener(void* UDP)
 	// Free all resources;
 	close(UDP_sock);
 	pclose(fp);
-	UDP_closed = 1;
 	pthread_exit(&t); //terminate thread.
 }
 
@@ -357,7 +356,6 @@ int handle_user_input()
 		{
 			perror("file doesn't exist, or is not readable. try again");
 			fprintf(stdout,"\nplease enter 0-%d to change station, 's' to upload a song, or 'q' to quit, then press Enter.\n", NumStations-1);
-			fclose(songP);
 			return SUCCESS; //func still successful
 		}
 	}
@@ -486,7 +484,7 @@ int handle_TCP_message()
 	{ perror("Error in reading from TCP socket"); printf("\n"); }
 	else if (TCP_pack_len == 0)
 	{
-		printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~~~TCP Connection closed by server.~~~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+		printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~TCP Connection closed by server.~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
 		state = OFF_INIT;
 		return ERROR;
 	}
