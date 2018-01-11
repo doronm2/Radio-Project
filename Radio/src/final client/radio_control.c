@@ -82,7 +82,8 @@ int main(int argc, char* argv[]) // Input: SERVER's IP_address/NAME, SERVER's TC
 		SERVER_TCP_IP = inet_ntoa(*(struct in_addr*)( hp -> h_addr_list[0])); //string ip address
 
 	//Check that we got from the user all of the arguments to activate the program
-	printf("arguments received - exe File: %s, Hostname: %s (TCP IP: %s), TCP port: %s,\n(total of %d args). connecting to radio server..\n", argv[0], argv[1],SERVER_TCP_IP, argv[2] , argc);
+	printf("arguments received - exe File: %s, Hostname: %s (TCP IP: %s), TCP port: %s,\n(total of %d args)."
+			" connecting to radio server..\n", argv[0], argv[1],SERVER_TCP_IP, argv[2] , argc);
 	if(argc != 3) { printf("Too few/many arguments received. Bye bye!\n"); exit(ERROR); }
 
 	SERVER_TCP_port = atoi(argv[2]); //get TCP port from input
@@ -130,6 +131,7 @@ UDP_sock_data setTCP_sock (char* serv_ip, int serv_port)
 UDP_sock_data handShake() //perform handshake and get mCast data.
 {
 	UDP_sock_data welc_msg; //mast data received in welc msg.
+	uint8_t replyType;
 	int rec_bytes = 0, retval=0;
 	unsigned char hello_msg [3] = {0,0,0} , welc_buff [9];
 
@@ -145,10 +147,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	retval = select(TCP_Sock+1, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
 	if (retval == -1) { perror("select() failed in upsong"); state = OFF_INIT; }
 	else if(FD_ISSET(TCP_Sock, &rfds) && retval) //data ready from STDIN, while not in upload.
-	{
-		printf("\nWelcome msg received from server! ");
 		state = WAIT_WELCOME;
-	}
 	else if(retval ==0) //timeout reached.
 	{
 		printf("\nWELCOME msg not received within 0.2 seconds. quitting program.\n");
@@ -159,17 +158,24 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 
 	rec_bytes = recv(TCP_Sock, welc_buff, sizeof(welc_buff) , 0); //receive welcome msg
 	if (rec_bytes == -1)
-	{ perror(""); printf("\nError in sending hello message"); return welc_msg;}
+	{ perror(""); printf("\nError in sending hello message"); return welc_msg; state = OFF_INIT;}
 	else if (rec_bytes != 9) // expected welcome msg size
-	{ printf("\nError in welcome message - size incorrect"); return welc_msg;}
+	{ printf("\nError in welcome message - size incorrect"); return welc_msg; state = OFF_INIT;}
 
+	// rec_bytes == 9
+	replyType = (uint8_t)welc_buff[0];
+	if (replyType == 0)
+	{
 	NumStations = ntohs(((uint16_t*)(welc_buff+1))[0]); //SET NUM OF RADIO STATIONS.
-
 	sprintf(welc_msg.mGroup_IP,"%d.%d.%d.%d",welc_buff[6],welc_buff[5],welc_buff[4],welc_buff[3]);	// get multicast address from buffer
 	inet_aton(welc_msg.mGroup_IP, &reference_mCast_addr); //put ip string in welc_msg.mGroup_IP
 	current_mCast_addr = reference_mCast_addr; //same Mcast addr at first
 	welc_msg.mGroup_port = ntohs(((uint16_t*)(welc_buff+7))[0]); //get port num
+	printf("\nWelcome msg received from server! ");
 	state = ESTABLISHED;
+	}
+	else
+		{ printf("\nreceived unexpected msg (NOT A WELCOME MSG). quitting program"); return welc_msg; state = OFF_INIT;}
 	return welc_msg;
 }
 
