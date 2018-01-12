@@ -448,7 +448,7 @@ int handle_TCP_message()
 					}
 					else
 					{
-						printf("error in uploading song. quitting program.\n");
+						printf("error in uploadSong() function.\n");
 						state = OFF_INIT;
 						fflush(stdin); //flush user input, if there was any.
 					}
@@ -557,7 +557,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 			TCP_pack_len = send(TCP_Sock,song_buff,Buffer_size,0);
 			COUNT +=TCP_pack_len; //todo
 			if(TCP_pack_len == -1)
-			{ perror(""); printf("\nError in uploading song"); state = OFF_INIT; break;}
+			{ perror(""); printf("\nError in uploading song, TCP_pack_len == -1\n"); state = OFF_INIT; break;}
 			else if (TCP_pack_len == 0)
 			{
 				printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~TCP Connection closed by server.~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
