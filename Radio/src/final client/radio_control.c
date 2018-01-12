@@ -121,7 +121,7 @@ UDP_sock_data setTCP_sock (char* serv_ip, int serv_port)
 
 	udp_data = handShake(TCP_Sock); //handshake with server, get relevant data from it.
 	if(strcmp(udp_data.mGroup_IP,"000000000000000") == 0 || udp_data.mGroup_port == 0 || !NumStations) //no real data received
-	{ printf("\nerror in welcome message! quitting program."); close(TCP_Sock); exit(ERROR); }
+	{ printf("\nerror in welcome message! quitting program.\n"); close(TCP_Sock); exit(ERROR); }
 	else
 		fprintf(stdout,"connection established. data received from server:\n%d stations, mGroup IP: %s, mGroup port: %d. playing"
 				" station 0.",NumStations,udp_data.mGroup_IP,udp_data.mGroup_port);
@@ -175,7 +175,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 		state = ESTABLISHED;
 	}
 	else
-	{ printf("\nreceived unexpected msg (NOT A WELCOME MSG). quitting program"); return welc_msg; state = OFF_INIT;}
+	{ printf("\nreceived unexpected msg (NOT A WELCOME MSG). quitting program.\n"); return welc_msg; state = OFF_INIT;}
 	return welc_msg;
 }
 
@@ -410,7 +410,7 @@ int handle_TCP_message()
 		switch(replyType)
 		{
 		case 0: //Welcome msg - invalid at this stage
-			printf("msg received with WELCOME msg CODE- invalid at this stage. exiting program");
+			printf("msg received with WELCOME msg CODE- invalid at this stage. exiting program.\n");
 			state = OFF_INIT;
 			return ERROR;
 
@@ -469,12 +469,12 @@ int handle_TCP_message()
 				arr = (char*)calloc(arr_len, sizeof(char)); //alloc msg size
 				for(i=0;i<arr_len;i++) //fill invalid msg to arr
 					arr[i] = buffer[i+2];
-				printf("invalidCommand msg recieved: ""%s"". quitting program.",arr);
+				printf("invalidCommand msg recieved: ""%s"". quitting program.\n",arr);
 				state = OFF_INIT;
 				free(arr);
 				return ERROR;
 			}
-			else { printf("invalid invalidCommand msg recieved. quitting program."); state = OFF_INIT; return ERROR; }
+			else { printf("invalid invalidCommand msg recieved. quitting program.\n"); state = OFF_INIT; return ERROR; }
 
 		case 4: //NewStations msg
 			if(TCP_pack_len == 3)
@@ -483,11 +483,11 @@ int handle_TCP_message()
 				printf("newstation announced by server!!! we now offer %d stations!",NumStations);
 				state = ESTABLISHED;
 			}
-			else { printf("invalid NewStations msg recieved. quitting program."); state = OFF_INIT; return ERROR; }
+			else { printf("invalid NewStations msg recieved. quitting program.\n"); state = OFF_INIT; return ERROR; }
 			break;
 
 		default : //	InvalidCommand or announce msg - check which one and handle accordingly
-			printf("bad message from server. quitting program =( ");
+			printf("bad message from server. quitting program =( \n");
 			state = OFF_INIT;
 			return ERROR;
 		}
@@ -515,7 +515,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 
 	song = fopen(song_file,"r"); //try to read song file
 	if(!song)  //can't open file
-	{ perror("uploadSong - can't open song file. quitting program."); free(song_file); state = OFF_INIT; return ERROR; }
+	{ perror("uploadSong - can't open song file. quitting program.\n"); free(song_file); state = OFF_INIT; return ERROR; }
 
 	while (fscanf(song, "%1024c", song_buff) != EOF && state != OFF_INIT && part_num < fileSize)
 	{
@@ -595,7 +595,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 						return SUCCESS;
 					}
 					else
-					{ printf("bad message received from server! quitting program."); state = OFF_INIT; }
+					{ printf("bad message received from server! quitting program.\n"); state = OFF_INIT; }
 				}
 				else
 					perror("bad TCP pack length");
