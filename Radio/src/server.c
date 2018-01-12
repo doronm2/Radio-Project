@@ -153,8 +153,8 @@ int main(int argc, char* argv[])
 	serverAddr.sin_port = htons((uint16_t )tcp_port); 	/* Set port number, using htons function to use proper byte order */
 	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY); /* Set IP address to localhost */
 	memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero); 	/* Set all bits of the padding field to 0 */
-	tv.tv_sec=2;
-	tv.tv_usec=0; //TODO - check timeout value
+	tv.tv_sec=0;
+	tv.tv_usec=10000;
 
 	/*---- Bind the address struct to the socket ----*/
 	setsockopt(welcomeSocket, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
@@ -202,12 +202,12 @@ int main(int argc, char* argv[])
 			pV4Addr = (struct sockaddr_in*)&serverStorage;
 			ipAddr = pV4Addr->sin_addr;
 			client->clientIP=calloc(INET_ADDRSTRLEN, sizeof(char));
-			inet_ntop( AF_INET, &ipAddr.s_addr,client->clientIP, INET_ADDRSTRLEN );
+			inet_ntop( AF_INET, &ipAddr.s_addr,client->clientIP,INET_ADDRSTRLEN);
 			if(DEBUG_MODE==1)
 				printf("new Client IP %s\n",client->clientIP);
 			client->client_index=client_ind;
 			/*---- Accept call creates a new socket for the incoming connection ----*/
-			if( pthread_create( &client->client_thread , NULL ,  handle_client , (void*)client) < 0)
+			if( pthread_create(&client->client_thread,NULL,handle_client,(void*)client) < 0)
 			{
 				perror("could not create thread");
 				close(client->socket);
@@ -227,7 +227,6 @@ int main(int argc, char* argv[])
 			Client_List[client_ind].socket=client->socket;
 
 			free(client->clientIP);
-
 		}
 		else if(FD_ISSET(STDIN_FILENO,&rfds)){
 			scanf("%c",&serverIO);
@@ -366,7 +365,7 @@ int close_connections(struct UDP_DATA *root_station){
 			}
 			Check = close(Client_List[index].socket);
 			if (Check != 0) {
-				perror("failed to close Socket");
+				perror("failed to close Client Socket, cc");
 				exit(1);
 			}
 			Client_List[index].active=0;
@@ -396,9 +395,11 @@ int close_connections(struct UDP_DATA *root_station){
  *  3.there s a timeout with a reply/uploading
  *
  */
-void* handle_client(void* data){ //TODO - check timeouts
+void* handle_client(void* data){
 	struct TCP_DATA *my_data=(struct TCP_DATA*)data;
 	int i,msg_len,msg_err=0, Hello_flag=0,check_upload,check_song;
+	int optval=1;
+	socklen_t optlen =sizeof(optval);
 	char buffer[Buffer_size+1],*song_name,*ending="mp3",*cmp_str;
 	uint8_t commandType = 0,song_name_len;
 	uint16_t client_data;
@@ -406,6 +407,7 @@ void* handle_client(void* data){ //TODO - check timeouts
 	Hello_flag=initial_connection(my_data);
 	if(Hello_flag==-1)
 		msg_err=1;
+	setsockopt(my_data->socket,SOL_SOCKET,SO_KEEPALIVE,&optval,optlen);
 	while(END_SERVER==0 && msg_err==0){
 		msg_len= (int) recv(my_data->socket, buffer, Buffer_size , 0);
 		if(msg_len>0){
@@ -462,7 +464,7 @@ void* handle_client(void* data){ //TODO - check timeouts
 					else{
 						check_song=check_new_song(song_name,song_name_len); //check that the song isn't playing already
 						if (check_song == 0) {
-							send_message(my_data->socket, PERMIT,0,NULL); //permit the client to upload the song
+							send_message(my_data->socket, PERMIT,1,NULL); //permit the client to upload the song
 							//upload the song to the server
 							check_upload = download_song(song_name, song_size, my_data->socket);
 							if (check_upload == -1) {
@@ -473,9 +475,7 @@ void* handle_client(void* data){ //TODO - check timeouts
 								open_new_station(song_name);
 						}
 						else{
-							send_message(my_data->socket, INVALID_MSG, 15, "Station Exist\0");
-							msg_err = 1;
-
+							send_message(my_data->socket, PERMIT, 0, NULL);
 						}
 					}
 					free(song_name);
@@ -489,10 +489,13 @@ void* handle_client(void* data){ //TODO - check timeouts
 				break;
 			}
 		}
+		else if (msg_len==0){
+			msg_err=1;
+		}
 
 	}
 	if (close(my_data->socket) != 0) {
-		perror("failed to close Socket");
+		perror("failed to close Client Socket");
 		exit(1);
 	}
 	Client_List[my_data->client_index].active=0; //mark as inactive
@@ -501,16 +504,20 @@ void* handle_client(void* data){ //TODO - check timeouts
 
 }
 int initial_connection(struct TCP_DATA *my_data){
-	int msg_len, Hello_flag=0;
+	int msg_len=0, Hello_flag=0;
 	char buffer[Buffer_size+1];
 	uint8_t commandType = 0;
+	fd_set rfds;
 	uint16_t client_data;
 	struct timeval tv;
 	tv.tv_sec = 0;
 	tv.tv_usec = 100000; //100 miliseconds timeout as defined
 	//set timeout for upload at 3 seconds
-	setsockopt(my_data->socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv,sizeof(struct timeval));
-	msg_len= (int) recv(my_data->socket, buffer, Buffer_size , 0);
+	FD_ZERO(&rfds);
+	FD_SET(my_data->socket, &rfds);
+	select(my_data->socket+1, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
+	if(FD_ISSET(my_data->socket,&rfds))
+			msg_len= (int) recv(my_data->socket, buffer, Buffer_size , 0);
 	if(msg_len>0){
 		commandType=(uint8_t )buffer[0];
 		if(commandType==0){
@@ -557,7 +564,7 @@ int initial_connection(struct TCP_DATA *my_data){
 			//Reply Type - 1 Byte
 			buffer[0]=ReplyType;
 			//Multicast Group - 4 Bytes
-			inet_aton(root_ip,&temp_mcast);;
+			inet_aton(root_ip,&temp_mcast);
 			*(uint32_t*)&buf32=ntohl(temp_mcast.s_addr);
 			buffer[3]=buf32[0];
 			buffer[4]=buf32[1];
@@ -592,7 +599,7 @@ int initial_connection(struct TCP_DATA *my_data){
 			//Reply Type - 1 Byte
 			buffer[0]=ReplyType;
 			//Song Name Size - 1 Byte
-			buffer[1]=(uint8_t)1; //1 equals Permit
+			buffer[1]=(uint8_t)str_len; //1 equals Permit
 			msg_len=2;
 			break;
 		case NEW_STATION:
@@ -706,6 +713,7 @@ int initial_connection(struct TCP_DATA *my_data){
 		fclose(song_fd);
 		return ret;
 	}
+
 	/*
 	 * a function to check if the song to upload is new
 	 * the function receives the song name, and the song name length
