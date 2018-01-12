@@ -120,8 +120,8 @@ UDP_sock_data setTCP_sock (char* serv_ip, int serv_port)
 	{ perror("TCP Can't connect to server"); close(TCP_Sock); exit(ERROR); }
 
 	udp_data = handShake(TCP_Sock); //handshake with server, get relevant data from it.
-	if(strcmp(udp_data.mGroup_IP,"000000000000000") == 0 && udp_data.mGroup_port== 0) //no real data received
-	{ printf("error in welcome message! quitting program."); close(TCP_Sock); exit(ERROR); }
+	if(strcmp(udp_data.mGroup_IP,"000000000000000") == 0 || udp_data.mGroup_port == 0 || !NumStations) //no real data received
+	{ printf("\nerror in welcome message! quitting program."); close(TCP_Sock); exit(ERROR); }
 	else
 		fprintf(stdout,"connection established. data received from server:\n%d stations, mGroup IP: %s, mGroup port: %d. playing"
 				" station 0.",NumStations,udp_data.mGroup_IP,udp_data.mGroup_port);
@@ -166,16 +166,16 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	replyType = (uint8_t)welc_buff[0];
 	if (replyType == 0)
 	{
-	NumStations = ntohs(((uint16_t*)(welc_buff+1))[0]); //SET NUM OF RADIO STATIONS.
-	sprintf(welc_msg.mGroup_IP,"%d.%d.%d.%d",welc_buff[6],welc_buff[5],welc_buff[4],welc_buff[3]);	// get multicast address from buffer
-	inet_aton(welc_msg.mGroup_IP, &reference_mCast_addr); //put ip string in welc_msg.mGroup_IP
-	current_mCast_addr = reference_mCast_addr; //same Mcast addr at first
-	welc_msg.mGroup_port = ntohs(((uint16_t*)(welc_buff+7))[0]); //get port num
-	printf("\nWelcome msg received from server! ");
-	state = ESTABLISHED;
+		NumStations = ntohs(((uint16_t*)(welc_buff+1))[0]); //SET NUM OF RADIO STATIONS.
+		sprintf(welc_msg.mGroup_IP,"%d.%d.%d.%d",welc_buff[6],welc_buff[5],welc_buff[4],welc_buff[3]);	// get multicast address from buffer
+		inet_aton(welc_msg.mGroup_IP, &reference_mCast_addr); //put ip string in welc_msg.mGroup_IP
+		current_mCast_addr = reference_mCast_addr; //same Mcast addr at first
+		welc_msg.mGroup_port = ntohs(((uint16_t*)(welc_buff+7))[0]); //get port num
+		printf("\nWelcome msg received from server! ");
+		state = ESTABLISHED;
 	}
 	else
-		{ printf("\nreceived unexpected msg (NOT A WELCOME MSG). quitting program"); return welc_msg; state = OFF_INIT;}
+	{ printf("\nreceived unexpected msg (NOT A WELCOME MSG). quitting program"); return welc_msg; state = OFF_INIT;}
 	return welc_msg;
 }
 
@@ -188,7 +188,7 @@ void* listener(void* UDP)
 	char  message[Buffer_size];
 	FILE * fp; //to throw audio to
 	socklen_t addr_len;
-    struct timeval timeout;
+	struct timeval timeout;
 
 	UDP_sock = socket(AF_INET, SOCK_DGRAM, 0); //create udp sock
 	if (UDP_sock == -1) { perror("Can't create UDP socket"); close(UDP_sock); pthread_exit(&t); exit(ERROR); }
@@ -221,10 +221,10 @@ void* listener(void* UDP)
 			setsockopt(UDP_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)); //join mGroup
 			change_station = 0; //now changed.
 		}
-	    timeout.tv_sec = 2;
-	    timeout.tv_usec = 0;
-	    if (setsockopt (UDP_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
-	    	{ perror("setsockopt failed\n"); state = OFF_INIT; break; }
+		timeout.tv_sec = 2;
+		timeout.tv_usec = 0;
+		if (setsockopt (UDP_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
+		{ perror("setsockopt failed\n"); state = OFF_INIT; break; }
 		UDP_pack_len = recvfrom(UDP_sock, message, sizeof(message), 0, (struct sockaddr *) &udp_serverAddr, &addr_len); //receive song
 		if(UDP_pack_len > 0)
 			fwrite (message , sizeof(char), Buffer_size, fp); //write a buffer of size Buffer_size into fp >> play  the song!!
@@ -521,15 +521,15 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 	{
 		printf("Song Uploading status: %.0f%% \r",percent); //show upload precentage
 		fflush(stdout);
-	    timeout.tv_sec = 1;
-	    timeout.tv_usec = 0;
-	    if (setsockopt (TCP_Sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
-	        {
-	    	perror("setsockopt failed\n"); state = OFF_INIT;
-	        free(song_file);
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		if (setsockopt (TCP_Sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0)
+		{
+			perror("setsockopt failed\n"); state = OFF_INIT;
+			free(song_file);
 			fclose(song);
 			break;
-	        }
+		}
 
 		if (part_num == fileSize - 1 && remeinder != 0) //UPLOAD LAST PART
 		{
