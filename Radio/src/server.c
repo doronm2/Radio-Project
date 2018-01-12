@@ -286,7 +286,7 @@ void* handle_station(void* data){
 
 	//try to open the socket to send the data on
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock == -1) { perror("Can't create socket"); close(sock); exit(1); }
+	if (sock == -1) { perror("Can't create socket"); close(sock); pthread_exit(NULL); }
 	Multicast_IP=(char*)calloc(1,sizeof(char));
 	sprintf(Multicast_IP,"%s",inet_ntoa(my_data->ip_address));
 	serverAddr.sin_family = AF_INET;
@@ -295,7 +295,7 @@ void* handle_station(void* data){
 
 	//try to bind this UDP socket
 	if(bind(sock, (struct sockaddr *) &serverAddr, sizeof(serverAddr))==-1)
-	{ perror("Can't bind UDP socket"); close(sock); exit(1); }
+	{ perror("Can't bind UDP socket"); close(sock); pthread_exit(NULL); }
 
 	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
 	setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &TTL, sizeof(TTL)); //set TTL field to 10
@@ -401,7 +401,7 @@ void* handle_client(void* data){
 	int optval=1;
 	socklen_t optlen =sizeof(optval);
 	char buffer[Buffer_size+1],*song_name,*ending="mp3",*cmp_str;
-	uint8_t commandType = 0,song_name_len;
+	uint8_t commandType = 0,song_name_len, buf32[4];
 	uint16_t client_data;
 	uint32_t song_size;
 	Hello_flag=initial_connection(my_data);
@@ -442,7 +442,9 @@ void* handle_client(void* data){
 
 				break;
 			case UPSONG:
-				song_size=(uint32_t )((buffer[1]<<24)+(buffer[2]<<16)+(buffer[3]<<8)+(buffer[4]));
+				for(i=0;i<4;i++)
+					buf32[i]=buffer[1+i];
+				song_size=ntohl(*(uint32_t*)buf32);
 				//if the song size is not as permitted
 				if(!(song_size>=MIN_SONG_SIZE && song_size<=MAX_SONG_SIZE)) {
 					//send an invalid command to the client
@@ -464,6 +466,7 @@ void* handle_client(void* data){
 					else{
 						check_song=check_new_song(song_name,song_name_len); //check that the song isn't playing already
 						if (check_song == 0) {
+							if(DOWNLOAD_SONG==0){
 							send_message(my_data->socket, PERMIT,1,NULL); //permit the client to upload the song
 							//upload the song to the server
 							check_upload = download_song(song_name, song_size, my_data->socket);
@@ -473,6 +476,9 @@ void* handle_client(void* data){
 							}
 							else
 								open_new_station(song_name);
+						}
+							else
+								send_message(my_data->socket, PERMIT, 0, NULL);
 						}
 						else{
 							send_message(my_data->socket, PERMIT, 0, NULL);
@@ -494,9 +500,9 @@ void* handle_client(void* data){
 		}
 
 	}
-	if (close(my_data->socket) != 0) {
+	if (close(my_data->socket) != 0){
 		perror("failed to close Client Socket");
-		exit(1);
+		pthread_exit(NULL);
 	}
 	Client_List[my_data->client_index].active=0; //mark as inactive
 	//free(my_data->clientIP);
@@ -571,12 +577,12 @@ int initial_connection(struct TCP_DATA *my_data){
 			buffer[5]=buf32[2];
 			buffer[6]=buf32[3];
 			//Num Stations - 2 Bytes
-			temp_16=ntohs(NUM_OF_STATIONS);
+			temp_16=htons(NUM_OF_STATIONS);
 			*(uint16_t*)&buf16=temp_16;
 			buffer[1]=buf16[0];
 			buffer[2]=buf16[1];
 			//Port Number - 2 Bytes
-			temp_16=ntohs(UDP_PORT);
+			temp_16=htons(UDP_PORT);
 			*(uint16_t*)&buf16=temp_16;
 			buffer[7]=buf16[0];
 			buffer[8]=buf16[1];
@@ -607,7 +613,7 @@ int initial_connection(struct TCP_DATA *my_data){
 			//Reply Type - 1 Byte
 			buffer[0]=ReplyType;
 			//Song Name Size - 1 Byte
-			temp_16=ntohs(str_len);
+			temp_16=htons(str_len);
 			*(uint16_t*)&buf16=temp_16;
 			buffer[1]=buf16[0];
 			buffer[2]=buf16[1];
