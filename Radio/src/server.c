@@ -1,4 +1,4 @@
-/* TCP_receiver
+/* radio_server - Final projects
 Author1: Victor Martinov,
 ID: 307835249
 Author2: Doron Maman,
@@ -20,12 +20,13 @@ ID: 302745146
 
 #define Buffer_size 	1024
 #define DEBUG_MODE      1
+#define uint32_t unsigned long long int
 /***************************************Structs*****************/
 
 struct UDP_DATA{
 	int num_of_station;
 	char *song_name;
-	int ip_address[4];
+	struct in_addr ip_address;
 	int port;
 	int shutdown;
 	pthread_t station_thread;
@@ -59,7 +60,7 @@ static struct TCP_DATA Client_List[100];  //the list is {socket,thread,station n
 static int NUM_OF_STATIONS=0;
 static int DOWNLOAD_SONG=0; //0- no song is uploading, 1- a song is uploading, 2 - a song has uploaded
 static int UDP_PORT=0;
-static int MultiCastIP[4]={0};
+static char *root_ip;
 static uint32_t MIN_SONG_SIZE=2000;
 static uint32_t MAX_SONG_SIZE=10000000;
 struct UDP_DATA *ROOT_ST;
@@ -80,11 +81,11 @@ void print_clients_station();
 int main(int argc, char* argv[])
 {
 	int welcomeSocket,tcp_port,udp_port,i=0,client_ind=0;
-	int temp,j=0,reuse=1,retval,print_welcome=0;
+	int reuse=1,retval,print_welcome=0;
 	struct sockaddr_in serverAddr;
 	struct sockaddr_storage serverStorage;
-	char *root_Multi_ip;
 	char serverIO;
+	struct in_addr ip;
 	socklen_t addr_size;
 	struct UDP_DATA *stations, *temp_station;
 	struct TCP_DATA *client;
@@ -120,7 +121,10 @@ int main(int argc, char* argv[])
 	udp_port = atoi(argv[3]); //for the udp port
 	UDP_PORT=udp_port;
 
-	root_Multi_ip = argv[2]; ///the initial multicast address
+	root_ip = argv[2]; ///the initial multicast address
+	inet_aton(root_ip,&ip);
+	//MultiCastIP[1]=ntohl(atoi(root_ip));
+	/*
 	for(i=0, j=0 ; i<4 ; i++){//copy the ip to int array
 		MultiCastIP[i] = 0;
 		for(; j<(argv[3]-argv[2]-1) && argv[2][j]!='.' ; j++){
@@ -129,6 +133,7 @@ int main(int argc, char* argv[])
 		}
 		j++;
 	}
+*/
 
 	//***********Get and open a thread for each station*********//
 	for(NUM_OF_STATIONS=0;NUM_OF_STATIONS<(argc-4);NUM_OF_STATIONS++){
@@ -137,9 +142,7 @@ int main(int argc, char* argv[])
 			stations->next= temp_station;
 			stations=stations->next;
 		}
-		for(i=0;i<4;i++)
-			stations->ip_address[i]=MultiCastIP[i];
-		stations->ip_address[3]+=NUM_OF_STATIONS;
+		stations->ip_address.s_addr=(uint32_t)ntohl(htonl(ip.s_addr)+NUM_OF_STATIONS);
 		stations->num_of_station=NUM_OF_STATIONS;
 		stations->shutdown=0; // flag to inform a the thread to close
 		stations->port=udp_port;
@@ -267,7 +270,8 @@ int main(int argc, char* argv[])
 	if(close_connections(ROOT_ST)==0)
 		printf("successfully closed TCP and UDP Sockets and Threads");
 	// Wait for socket to have data, Read socket data into buffer if there is Any data
-	free(root_Multi_ip);
+	if(root_ip!=NULL)
+		free(root_ip);
 	return EXIT_SUCCESS;
 }
 
@@ -294,8 +298,7 @@ void* handle_station(void* data){
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == -1) { perror("Can't create socket"); close(sock); exit(1); }
 	Multicast_IP=(char*)calloc(1,sizeof(char));
-	sprintf(Multicast_IP,"%hhu.%hhu.%hhu.%hhu",my_data->ip_address[0]
-																   ,my_data->ip_address[1],my_data->ip_address[2],(my_data->ip_address[3]+my_data->num_of_station));
+	sprintf(Multicast_IP,"%s",inet_ntoa(my_data->ip_address));
 	serverAddr.sin_family = AF_INET;
 	serverAddr.sin_addr.s_addr = inet_addr(Multicast_IP);
 	serverAddr.sin_port = htons((uint16_t) my_data->port);
@@ -535,21 +538,31 @@ void* handle_client(void* data){ //TODO - check timeouts
 int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
 	int index,msg_len=0;
 	uint8_t ReplyType;
-	unsigned char buffer[50]={'\0'};//Largest message - 50 Bytes
+	uint16_t temp_port,temp_num;
+	struct in_addr temp_mcast;
+	unsigned char buffer[50]={'\0'},buf32[4]={'\0'},buf16[2]={'\0'};//Largest message - 50 Bytes
 	switch (ans){
 	case WELCOME:
 		ReplyType=0;
 		//Reply Type - 1 Byte
 		buffer[0]=ReplyType;
 		//Num Stations - 2 Bytes
-		buffer[1]=(uint8_t)(NUM_OF_STATIONS&0xFF00)>>8;
-		buffer[2]=(uint8_t)(NUM_OF_STATIONS&0x00FF);
+		temp_num=ntohs(NUM_OF_STATIONS+1);
+		*(uint16_t*)&buf16=temp_num;
+		buffer[1]=buf16[0];
+		buffer[2]=buf16[1];
 		//Multicast Group - 4 Bytes
-		for(index=0;index<4;index++)
-			buffer[3+index]= (unsigned char) MultiCastIP[3 - index];
+		inet_aton(root_ip,&temp_mcast);;
+		*(uint32_t*)&buf32=temp_mcast.s_addr;
+		buffer[3]=buf32[0];
+		buffer[4]=buf32[1];
+		buffer[5]=buf32[2];
+		buffer[6]=buf32[3];
 		//Port Number - 2 Bytes
-		buffer[7]=(uint8_t)(UDP_PORT&0xFF00)>>8;
-		buffer[8]=(uint8_t)(UDP_PORT&0x00FF);
+		temp_port=ntohs(UDP_PORT);
+		*(uint16_t*)&buf16=temp_port;
+		buffer[7]=buf16[0];
+		buffer[8]=buf16[1];
 		msg_len=9;
 		break;
 	case ANNOUNCE:
@@ -715,15 +728,11 @@ int check_new_song(char* song_name,int song_len){
  *
  */
 int open_new_station(char* song_name){
-	int i;
 	struct UDP_DATA *temp=ROOT_ST;
 	while(temp->next!=NULL)
 		temp=temp->next;
 	temp->next=(struct UDP_DATA*)calloc(1, sizeof(struct UDP_DATA));
-	for(i=0;i<4;i++)
-		temp->next->ip_address[i]=temp->ip_address[i];
-	temp->next->ip_address[3]+=1; //add 1 to the multicast IP
-
+	temp->next->ip_address.s_addr=(uint32_t)ntohl((htonl(temp->ip_address.s_addr))+1);;
 	temp->next->num_of_station=temp->num_of_station+1;
 	temp->next->shutdown=0; // flag to inform a the thread to close
 	temp->next->port=temp->port;
@@ -754,9 +763,8 @@ void print_server_data(){
     struct UDP_DATA *temp=ROOT_ST;
     printf("\n***********\nServer Stations list:\n\n");
     for(i=0;i<NUM_OF_STATIONS;i++)
-        printf("### Station %d is playing on Multicast %d.%d.%d.%d\nSong playing %s\n"
-                ,i,temp->ip_address[0],temp->ip_address[1],temp->ip_address[2]
-                ,temp->ip_address[3],temp->song_name);
+        printf("### Station %d is playing on Multicast %s\nSong playing %s\n"
+                ,i,inet_ntoa(temp->ip_address),temp->song_name);
     for(i=0;i<100;i++) {
         if (Client_List[i].active == 1)
             printf("Client %d with ip adrress: %s\n",Client_List[i].client_index
@@ -770,8 +778,8 @@ void print_clients_station() {
     struct UDP_DATA *temp = ROOT_ST;
     printf("\n**********\nServer Stations list with Clients listening:\n\n");
     for (i = 0; i < NUM_OF_STATIONS; i++) {
-        printf("\n### Station %d is playing on Multicast %d.%d.%d.%d\nSong playing %s\n", i, temp->ip_address[0],
-               temp->ip_address[1], temp->ip_address[2], temp->ip_address[3], temp->song_name);
+        printf("\n### Station %d is playing on Multicast %s\nSong playing %s\n"
+        		,i,inet_ntoa(temp->ip_address), temp->song_name);
         printf("Clients on the Station:\n");
         client_on=0;
         for (j = 0; j < 100; j++) {
@@ -789,4 +797,3 @@ void print_clients_station() {
 }
 
 #endif
-
