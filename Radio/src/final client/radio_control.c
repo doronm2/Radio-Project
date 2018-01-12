@@ -39,11 +39,11 @@ ID: 302745146
 #define 	max_num_stations	65535
 #define 	max_uInput_len		100 //user input length
 
-#define 	server_is_idiot		1 //server that doesn't send newStations msg to uploading client
+#define 	server_is_idiot		0//server that doesn't send newStations msg to uploading client
 
 
 //global variables
-int state=0, upload=0, change_station=0, current_station=0,remeinder=0 , TCP_Sock = 0 ,msg_sent = 0 ,multicastGroup;
+int state=0, upload=0, change_station=0, current_station=0,remeinder=0 , TCP_Sock = 0 ,msg_sent = 0 ,multicastGroup , COUNT=0;
 unsigned short NumStations =0;
 int uploading = 0; //to indicate we are in upload process
 char * song_file; //uploaded song file name
@@ -145,7 +145,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	{ perror(""); printf("\nError in sending hello message"); return welc_msg;} //returning empty struct
 
 	retval = select(TCP_Sock+1, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
-	if (retval == -1) { perror("select() failed in upsong"); state = OFF_INIT; }
+	if (retval == -1) { perror("select() failed in handshake"); state = OFF_INIT; }
 	else if(FD_ISSET(TCP_Sock, &rfds) && retval) //data ready from STDIN, while not in upload.
 		state = WAIT_WELCOME;
 	else if(retval ==0) //timeout reached.
@@ -331,11 +331,11 @@ int handle_user_input()
 			rewind(songP); // return the pointer back to start of file
 			if(song_size > MIN_SONG_SIZE && song_size < MAX_SONG_SIZE) // good size
 			{
-				//printf("file size to upload is: %d bytes.\n",song_size); //only for us to be sure.
+				printf("file size to upload is: %d bytes.\n",song_size); //only for us to be sure. todo
 				upSong_msg = (char*)calloc(1,(Song_name_size+6)*sizeof(char)); //+6 for command type, song size, and song name size.
 				//fill upSong buffer
 				upSong_msg[0] = (uint8_t)2; //command type = 0
-				*(uint32_t*)&upSong_msg[1] = ntohl(song_size); // host to network order, as requested.
+				*(uint32_t*)&upSong_msg[1] = htonl(song_size); // host to network order, as requested.
 				upSong_msg[5] = (uint8_t)Song_name_size;
 				for (i=6; i<Song_name_size+6; i++) //fill song name.
 					upSong_msg[i] = user_input[i-6];
@@ -534,6 +534,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 		if (part_num == fileSize - 1 && remeinder != 0) //UPLOAD LAST PART
 		{
 			TCP_pack_len = send(TCP_Sock,song_buff,remeinder,0);
+			COUNT +=TCP_pack_len; //todo
 			if(TCP_pack_len == -1)
 			{ perror(""); printf("\nError in uploading last part"); state = OFF_INIT; }
 			else if (TCP_pack_len == 0)
@@ -554,6 +555,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 		else //upload all other parts.
 		{
 			TCP_pack_len = send(TCP_Sock,song_buff,Buffer_size,0);
+			COUNT +=TCP_pack_len; //todo
 			if(TCP_pack_len == -1)
 			{ perror(""); printf("\nError in uploading song"); state = OFF_INIT; break;}
 			else if (TCP_pack_len == 0)
@@ -569,6 +571,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 		}
 	}
 	fclose(song);
+	printf("total bytes sent: %d\n", COUNT);
 	if((fscanf(song, "%1024c", song_buff))==EOF && !server_is_idiot) //EOF reached. expecting newStations msg.
 	{
 		state = WAIT_NEW_STATIONS;
@@ -605,6 +608,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 		{
 			printf("NewStations msg not received within 2 seconds. quitting program.\n");
 			state = OFF_INIT;
+			return ERROR;
 		}
 	}
 	else if (server_is_idiot)
