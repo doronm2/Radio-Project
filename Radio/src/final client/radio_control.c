@@ -132,14 +132,19 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 {
 	UDP_sock_data welc_msg; //mast data received in welc msg.
 	uint8_t replyType;
-	int rec_bytes = 0, retval=0;
+	int rec_bytes = 0, retval=0,i;
 	unsigned char hello_msg [3] = {0,0,0} , welc_buff [9];
+
+	//reset the struct.
+	for (i=0;i<maxIPlen ; i++)
+		welc_msg.mGroup_IP[i] = '0';
+	welc_msg.mGroup_port =0;
 
 	//reset fds reader and timeout struct.
 	FD_ZERO(&rfds);
 	FD_SET(TCP_Sock, &rfds);
-	tv.tv_sec = 0; // set timeouts -wait for 0.2 sec for the WELCOME MSG
-	tv.tv_usec = 200000;
+	tv.tv_sec = 0; // set timeouts -wait for 0.1 sec for the WELCOME MSG
+	tv.tv_usec = 100000;
 
 	if(send(TCP_Sock,hello_msg,sizeof(hello_msg),0) == -1)
 	{ perror(""); printf("\nError in sending hello message"); return welc_msg;} //returning empty struct
