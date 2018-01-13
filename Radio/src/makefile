@@ -7,7 +7,7 @@ CC = gcc
 CFLAGS  = -pthread -lm -g -Wall  
 
 # the build target executable:
-TARGET = server
+TARGET = radio_server
 
 
 all:	clean	$(TARGET)
