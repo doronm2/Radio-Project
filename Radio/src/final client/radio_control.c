@@ -290,6 +290,7 @@ void handle_TCP_and_IO()
 		}
 		if(retval==0 && msg_sent == 1) //timeout reached when sending message, response not on time. quit.
 		{
+			printf ("no response received from server for 100ms. quitting program.\n");
 			state = OFF_INIT;
 		}
 	}
