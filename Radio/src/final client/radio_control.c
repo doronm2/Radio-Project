@@ -81,11 +81,12 @@ int main(int argc, char* argv[]) // Input: SERVER's IP_address/NAME, SERVER's TC
 	else
 		SERVER_TCP_IP = inet_ntoa(*(struct in_addr*)( hp -> h_addr_list[0])); //string ip address
 
-	//Check that we got from the user all of the arguments to activate the program
+	/*Check that we got from the user all of the arguments to activate the program
 	printf("arguments received - exe File: %s, Hostname: %s (TCP IP: %s), TCP port: %s,\n(total of %d args)."
-			" connecting to radio server..\n", argv[0], argv[1],SERVER_TCP_IP, argv[2] , argc);
+			, argv[0], argv[1],SERVER_TCP_IP, argv[2] , argc);*/
 	if(argc != 3) { printf("Too few/many arguments received. Bye bye!\n"); exit(ERROR); }
 
+	printf("connecting to radio server..\n");
 	SERVER_TCP_port = atoi(argv[2]); //get TCP port from input
 	udpData = setTCP_sock(SERVER_TCP_IP,SERVER_TCP_port); //get UDP port and ip (multicast data)
 
@@ -144,7 +145,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	FD_ZERO(&rfds);
 	FD_SET(TCP_Sock, &rfds);
 	tv.tv_sec = 0; // set timeouts -wait for 0.1 sec for the WELCOME MSG
-	tv.tv_usec = 200000;
+	tv.tv_usec = 100000;
 
 	if(send(TCP_Sock,hello_msg,sizeof(hello_msg),0) == -1)
 	{ perror(""); printf("\nError in sending hello message"); return welc_msg;} //returning empty struct
@@ -176,7 +177,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 		inet_aton(welc_msg.mGroup_IP, &reference_mCast_addr); //put ip string in welc_msg.mGroup_IP
 		current_mCast_addr = reference_mCast_addr; //same Mcast addr at first
 		welc_msg.mGroup_port = ntohs(((uint16_t*)(welc_buff+7))[0]); //get port num
-		printf("\nWelcome msg received from server! ");
+		printf("\n********Welcome msg received!******** ");
 		state = ESTABLISHED;
 	}
 	else
@@ -309,8 +310,8 @@ int handle_user_input()
 
 	if(strcmp(user_input, "s")==0 || strcmp(user_input, "S")==0) //upload procedure
 	{
-		printf("please enter your desired song's name to upload (up to %d characters, including suffix '.mp3').\n",max_uInput_len);
-		printf("your song upload options:");
+		printf("please enter song name to upload (up to 100 characters, with suffix '.mp3').\n");
+		printf("upload options:");
 		d = opendir(".");
 		if (d)
 		{
@@ -322,7 +323,10 @@ int handle_user_input()
 					i++;
 				}
 			}
-			printf(". please enter your choice.\n");
+			if(i>1)
+				printf(". enter your choice.\n");
+			else
+				printf("none.");
 			closedir(d);
 		}
 		fflush(stdin);
@@ -416,19 +420,19 @@ int handle_TCP_message()
 		switch(replyType)
 		{
 		case 0: //Welcome msg - invalid at this stage
-			printf("msg received with WELCOME msg CODE- invalid at this stage. exiting program.\n");
+			printf("WELCOME msg received- invalid at this stage. exiting program.\n");
 			state = OFF_INIT;
 			return ERROR;
 
 		case 1: //announce msg
 			if(TCP_pack_len >=2 && state == WAIT_ANNOUNCE) //all good
 			{
-				printf("announce msg received!!");
+				printf("********announce msg received!!********");
 				arr_len = (uint8_t)buffer[1]; //length of song received
 				arr = (char*)calloc(arr_len, sizeof(char));
 				for(i=0;i<arr_len;i++) //fill song name to arr.
 					arr[i] = buffer[i+2];
-				printf(" changing to new station! new station's song name: %s.",arr); //present new song
+				printf(" changed station's song name: %s.",arr); //present new song
 				change_station = 1; //change staion in listener thread
 				state = ESTABLISHED;
 				free(arr);
@@ -439,12 +443,12 @@ int handle_TCP_message()
 		case 2: //PermitSong msg
 			if(TCP_pack_len == 2 && state == WAIT_PERMIT) //all good
 			{
-				printf("PermitSong msg received!! ");
+				printf("********PermitSong msg received!!******** ");
 				permit = (uint8_t)buffer[1];
 				if(permit == 1)
 				{
 					state = UPLOAD_SONG;
-					printf("song permitted to upload!! uploading.. (no I/O currently possible).\n");
+					printf("permitted to upload!! uploading.. (no I/O currently possible).\n");
 					uploading = 1; //flag not to disable IO
 					if(uploadSong(TCP_Sock) == 1) //uploaded successfully
 					{
@@ -461,7 +465,7 @@ int handle_TCP_message()
 				}
 				else if(permit == 0)
 				{
-					printf("song not permitted to upload =( please try a different song.\n");
+					printf("not permitted to upload =( try a different song.\n");
 					return SUCCESS;
 				}
 			}
@@ -475,7 +479,7 @@ int handle_TCP_message()
 				arr = (char*)calloc(arr_len, sizeof(char)); //alloc msg size
 				for(i=0;i<arr_len;i++) //fill invalid msg to arr
 					arr[i] = buffer[i+2];
-				printf("invalidCommand msg recieved: ""%s"". quitting program.\n",arr);
+				printf("********invalidCommand msg recieved********:\n ""%s"". quitting program.\n",arr);
 				state = OFF_INIT;
 				free(arr);
 				return ERROR;
@@ -486,14 +490,14 @@ int handle_TCP_message()
 			if(TCP_pack_len == 3)
 			{
 				NumStations = ntohs(((uint16_t*)(buffer+1))[0]);
-				printf("newstation announced by server!!! we now offer %d stations!",NumStations);
+				printf("********newstations!!!******** we now offer %d stations!",NumStations);
 				state = ESTABLISHED;
 			}
 			else { printf("invalid NewStations msg recieved. quitting program.\n"); state = OFF_INIT; return ERROR; }
 			break;
 
 		default : //	InvalidCommand or announce msg - check which one and handle accordingly
-			printf("bad message from server. quitting program =( \n");
+			printf("********bad message from server.******** quitting program =( \n");
 			state = OFF_INIT;
 			return ERROR;
 		}
@@ -599,7 +603,7 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 					if(replyType == 4 && TCP_pack_len == 3)  //NewStations msg
 					{
 						NumStations = ntohs(((uint16_t*)(buffer+1))[0]);
-						printf("NewStations announced by server!!! we now offer %d stations! input possible again.",NumStations);
+						printf("********NewStations!!!******** we now offer %d stations! I/O possible again.",NumStations);
 						free(song_file);
 						return SUCCESS;
 					}
