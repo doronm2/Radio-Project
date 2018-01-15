@@ -34,7 +34,7 @@ ID: 302745146
 #define 	MAX_SONG_SIZE 		1024*1024*10 //10Mibs
 #define 	ERROR			 	0 // func FAIL return value
 #define 	SUCCESS				1  // func SUCCESSFULL return value
-#define 	upload_delay		8000 //set the upload rate at the client to 1KiB every 8000 usec.
+#define 	upload_delay		11000 //set the upload rate at the client to 1KiB every 8000 usec.
 #define 	kiB					1024
 #define 	max_num_stations	65535
 #define 	max_uInput_len		100 //user input length
@@ -144,7 +144,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	FD_ZERO(&rfds);
 	FD_SET(TCP_Sock, &rfds);
 	tv.tv_sec = 0; // set timeouts -wait for 0.1 sec for the WELCOME MSG
-	tv.tv_usec = 100000;
+	tv.tv_usec = 200000;
 
 	if(send(TCP_Sock,hello_msg,sizeof(hello_msg),0) == -1)
 	{ perror(""); printf("\nError in sending hello message"); return welc_msg;} //returning empty struct
