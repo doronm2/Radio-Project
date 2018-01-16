@@ -176,8 +176,9 @@ int main(int argc, char* argv[])
 	while(END_SERVER==0) {
 		if(print_welcome==0){
 			print_welcome=1;
-			printf("\n*******Welcome to Radio Server!***********"
-					"\nTo print the Server data press 'p'\nTo exit the program, press 'q'\n*************************\n");
+			printf("\n**************Welcome to Radio Server!**************"
+					"\nTo print the Server data press 'p'\nTo exit the program, press 'q'"
+					"\n****************************************************\n");
 		}
 		FD_ZERO(&rfds);
 		FD_SET(down,&rfds);
@@ -276,7 +277,6 @@ void* handle_station(void* data){
 	if (sock == -1) { perror("Can't create socket"); close(sock); pthread_exit(NULL); }
 	Multicast_IP=(char*)calloc(1,sizeof(char));
 	sprintf(Multicast_IP,"%s",inet_ntoa(my_data->ip_address));
-	printf("%s - station\n",Multicast_IP);
 	serverAddr.sin_family = AF_INET;
 	serverAddr.sin_addr.s_addr = inet_addr(Multicast_IP);
 	serverAddr.sin_port = htons((uint16_t) my_data->port);
@@ -760,7 +760,7 @@ int check_new_song(char* song_name,int song_len){
 				root=root->next;
 			else
 				end_of_list=1;
-		}while(check!=0 && end_of_list==0);
+ 		}while(check!=0 && end_of_list==0);
 	}
 	if(check!=0){
 		ret=0;
@@ -788,7 +788,6 @@ int open_new_station(char* song_name){
 	temp->next->port=temp->port;
 	temp->next->song_name=calloc(1,sizeof(song_name));
 	strcpy(temp->next->song_name,song_name);
-	printf("%s",inet_ntoa(temp->next->ip_address));
 	temp=temp->next;
 	if( pthread_create( &temp->station_thread , NULL ,  &handle_station , (void*)temp) < 0){
 		perror("could not create thread");
@@ -813,40 +812,45 @@ char* find_song(int channel){
 void print_server_data(){
 	int i;
 	struct UDP_DATA *temp=ROOT_ST;
-	printf("\n***********\nServer Stations list:\n");
-	for(i=0;i<NUM_OF_STATIONS;i++)
-		printf("### Station %d is playing on Multicast %s\nSong playing %s\n"
+	printf("\n***************************************\n");
+	printf(	"nServer Stations list:\n");
+	for(i=0;i<NUM_OF_STATIONS;i++){
+		printf("\n### Station %d is playing on Multicast %s\nSong playing %s\n"
 				,i,inet_ntoa(temp->ip_address),temp->song_name);
+	}
+	printf("Connected Client list/n");
 	for(i=0;i<100;i++) {
 		if (Client_List[i].active == 1)
-			printf("Client %d with ip adrress: %s\n",Client_List[i].client_index
+			printf("-Client %d with ip address: %s\n",Client_List[i].client_index
 					,Client_List[i].clientIP);
 	}
-	printf("***************\n\n");
+	printf("***************************************\n\n");
 }
 
 void print_clients_station() {
 	int i, j,client_on=0;
 	struct UDP_DATA *temp = ROOT_ST;
-	printf("\n**********\nServer Stations list with Clients listening:\n");
+	printf("\n***************************************\n");
+	printf("Server Stations list with Clients listening:\n");
 	for (i = 0; i < NUM_OF_STATIONS; i++) {
 		printf("\n### Station %d is playing on Multicast %s\nSong playing %s\n"
 				,i,inet_ntoa(temp->ip_address), temp->song_name);
-		printf("Clients on the Station:\n");
+		printf("Clients Listening to the Station:\n");
 		client_on=0;
 		for (j = 0; j < 100; j++) {
 			if (Client_List[j].active == 1 && Client_List[j].station_num == i) {
 				client_on++;
-				printf("Client %d, with IP address %s\n", Client_List[i].client_index, Client_List[i].clientIP);
+				printf("-Client %d, with IP address %s\n", Client_List[j].client_index, Client_List[j].clientIP);
 			}
 		}
 		if (client_on == 0)
-			printf("No Clients listenning to the station\n");
+			printf("---No Clients listenning to the station\n");
 		if(temp->next!=NULL)
 			temp=temp->next;
-		printf("*************\n\n");
+		printf("***************************************\n\n");
 	}
 }
 
 #endif
+
 
