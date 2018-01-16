@@ -420,19 +420,19 @@ int handle_TCP_message()
 		switch(replyType)
 		{
 		case 0: //Welcome msg - invalid at this stage
-			printf("WELCOME msg received- invalid at this stage. exiting program.\n");
+			printf("*****WELCOME msg received- invalid at this stage.\n exiting program.*****\n");
 			state = OFF_INIT;
 			return ERROR;
 
 		case 1: //announce msg
 			if(TCP_pack_len >=2 && state == WAIT_ANNOUNCE) //all good
 			{
-				printf("********announce msg received!!********");
+				printf("*****announce msg received!!");
 				arr_len = (uint8_t)buffer[1]; //length of song received
 				arr = (char*)calloc(arr_len, sizeof(char));
 				for(i=0;i<arr_len;i++) //fill song name to arr.
 					arr[i] = buffer[i+2];
-				printf(" changed station's song name: %s.",arr); //present new song
+				printf(" changed station's song name: %s.*****",arr); //present new song
 				change_station = 1; //change staion in listener thread
 				state = ESTABLISHED;
 				free(arr);
@@ -443,12 +443,12 @@ int handle_TCP_message()
 		case 2: //PermitSong msg
 			if(TCP_pack_len == 2 && state == WAIT_PERMIT) //all good
 			{
-				printf("********PermitSong msg received!!******** ");
+				printf("*****PermitSong msg received!! ");
 				permit = (uint8_t)buffer[1];
 				if(permit == 1)
 				{
 					state = UPLOAD_SONG;
-					printf("permitted to upload!! uploading.. (no I/O currently possible).\n");
+					printf("permitted to upload!!\nuploading.. (no I/O currently possible).*****\n");
 					uploading = 1; //flag not to disable IO
 					if(uploadSong(TCP_Sock) == 1) //uploaded successfully
 					{
@@ -465,7 +465,7 @@ int handle_TCP_message()
 				}
 				else if(permit == 0)
 				{
-					printf("not permitted to upload =( try a different song.\n");
+					printf("not permitted to upload =( try a different song.*****\n");
 					return SUCCESS;
 				}
 			}
@@ -479,7 +479,7 @@ int handle_TCP_message()
 				arr = (char*)calloc(arr_len, sizeof(char)); //alloc msg size
 				for(i=0;i<arr_len;i++) //fill invalid msg to arr
 					arr[i] = buffer[i+2];
-				printf("********invalidCommand msg recieved********:\n ""%s"". quitting program.\n",arr);
+				printf("*****invalidCommand msg recieved:\n ""%s"". quitting program.*****\n",arr);
 				state = OFF_INIT;
 				free(arr);
 				return ERROR;
@@ -490,14 +490,14 @@ int handle_TCP_message()
 			if(TCP_pack_len == 3)
 			{
 				NumStations = ntohs(((uint16_t*)(buffer+1))[0]);
-				printf("********newstations!!!******** we now offer %d stations!",NumStations);
+				printf("*****newstations!!! we now offer %d stations!*****\n",NumStations);
 				state = ESTABLISHED;
 			}
 			else { printf("invalid NewStations msg recieved. quitting program.\n"); state = OFF_INIT; return ERROR; }
 			break;
 
 		default : //	InvalidCommand or announce msg - check which one and handle accordingly
-			printf("********bad message from server.******** quitting program =( \n");
+			printf("********bad message from server. quitting program =( *****\n");
 			state = OFF_INIT;
 			return ERROR;
 		}
