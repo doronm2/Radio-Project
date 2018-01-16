@@ -358,7 +358,7 @@ int handle_user_input()
 				state = WAIT_PERMIT;
 
 				//remember which song to upload.
-				song_file = (char*)calloc(Song_name_size,sizeof(char)); //+6 for command type, song size, and song name size.
+				song_file = (char*)calloc(,sizeof(char)); //+6 for command type, song size, and song name size.
 				for (i=0; i<Song_name_size; i++)
 					song_file[i] = user_input[i];
 
