@@ -144,7 +144,7 @@ int main(int argc, char* argv[])
 			perror("could not create thread");
 	}
 	// a thread to send new message to all the clients
-	pthread_create(&new_station,NULL,&send_new_station,(void*)ROOT_ST);
+	pthread_create(&new_station,NULL,&send_new_station,(void*)ROOT_ST);//TODO - fix leak
 
 	// Create the socket. The three arguments are:
 	/* 1) Internet domain. 2) Stream socket. 3) Default protocol (TCP in this case) */
@@ -207,13 +207,13 @@ int main(int argc, char* argv[])
 				//****get the client IP****//
 				pV4Addr = (struct sockaddr_in*)&serverStorage;
 				ipAddr = pV4Addr->sin_addr;
-				Client_List[client_ind].clientIP=calloc(INET_ADDRSTRLEN, sizeof(char));
+				Client_List[client_ind].clientIP=calloc(INET_ADDRSTRLEN, sizeof(char)); //TODO - fix leak
 				inet_ntop( AF_INET, &ipAddr.s_addr,Client_List[client_ind].clientIP,INET_ADDRSTRLEN);
 				if(DEBUG_MODE==1)
 					printf("new Client IP %s\n",Client_List[client_ind].clientIP);
 				Client_List[client_ind].client_index=client_ind;
 				/*---- Accept call creates a new socket for the incoming connection ----*/
-				if( pthread_create(&Client_List[client_ind].client_thread,NULL,&handle_client,(void*)client_ind) < 0)
+				if( pthread_create(&Client_List[client_ind].client_thread,NULL,&handle_client,(void*)client_ind) < 0)//TODO - fix leak
 				{
 					perror("could not create thread");
 					close(Client_List[client_ind].socket);
@@ -789,7 +789,7 @@ int open_new_station(char* song_name){
 	temp->next->song_name=calloc(1,sizeof(song_name));
 	strcpy(temp->next->song_name,song_name);
 	temp=temp->next;
-	if( pthread_create( &temp->station_thread , NULL ,  &handle_station , (void*)temp) < 0){
+	if( pthread_create( &temp->station_thread , NULL ,  &handle_station , (void*)temp) < 0){ //TODO - fix leak
 		perror("could not create thread");
 		return -1;
 	}
