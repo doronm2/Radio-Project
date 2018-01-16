@@ -124,7 +124,7 @@ UDP_sock_data setTCP_sock (char* serv_ip, int serv_port)
 	if(strcmp(udp_data.mGroup_IP,"000000000000000") == 0 || udp_data.mGroup_port == 0 || !NumStations) //no real data received
 	{ printf("\nerror in welcome message! quitting program.\n"); close(TCP_Sock); exit(ERROR); }
 	else
-		fprintf(stdout,"connection established. data received from server:\n%d stations, mGroup IP: %s, mGroup port: %d. playing"
+		fprintf(stdout,"\nconnection established. data received from server:\n\n%d stations, mGroup IP: %s, mGroup port: %d. playing"
 				" station 0.",NumStations,udp_data.mGroup_IP,udp_data.mGroup_port);
 	return udp_data; //return UDP socket info
 }
@@ -189,7 +189,7 @@ void* listener(void* UDP)
 {
 	UDP_sock_data udp_data = *(UDP_sock_data*)UDP; //get struct sent to thread.
 	struct ip_mreq mreq; //mCast request
-	int UDP_sock,UDP_pack_len =1, reuse = 1;
+	int UDP_sock,UDP_pack_len =1, reuse = 1,i=0;
 	struct sockaddr_in udp_serverAddr = {0};
 	char  message[Buffer_size];
 	FILE * fp; //to throw audio to
@@ -217,7 +217,7 @@ void* listener(void* UDP)
 	fp = popen("play -t mp3 -> /dev/null 2>&1", "w");//open a pipe. output is sent to dev/null (hell).
 
 	// Wait for socket to have data, Read socket data into buffer if there is Any data
-	while(state != OFF_INIT) // While (not all data received || connection closed by server)
+	while(state != OFF_INIT && i > 5) // While (not all data received || connection closed by server)
 	{
 		if(change_station)
 		{
@@ -235,7 +235,12 @@ void* listener(void* UDP)
 		if(UDP_pack_len > 0)
 			fwrite (message , sizeof(char), Buffer_size, fp); //write a buffer of size Buffer_size into fp >> play  the song!!
 		if (UDP_pack_len < 0)
-		{ perror("Error in reading from UDP socket"); printf("\n"); }
+		{
+ 		perror("Error in reading from UDP socket");
+		i++;
+		if(i == 5)
+			state = OFF_INIT;
+		}
 		else if (UDP_pack_len == 0)// - Connection closed by server
 		{
 			printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~~~UDP Connection closed by server.~~~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
@@ -358,7 +363,7 @@ int handle_user_input()
 				state = WAIT_PERMIT;
 
 				//remember which song to upload.
-				song_file = (char*)calloc(,sizeof(char)); //+6 for command type, song size, and song name size.
+				song_file = (char*)calloc(Song_name_size,sizeof(char)); //+6 for command type, song size, and song name size.
 				for (i=0; i<Song_name_size; i++)
 					song_file[i] = user_input[i];
 

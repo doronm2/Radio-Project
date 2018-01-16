@@ -124,8 +124,8 @@ UDP_sock_data setTCP_sock (char* serv_ip, int serv_port)
 	if(strcmp(udp_data.mGroup_IP,"000000000000000") == 0 || udp_data.mGroup_port == 0 || !NumStations) //no real data received
 	{ printf("\nerror in welcome message! quitting program.\n"); close(TCP_Sock); exit(ERROR); }
 	else
-		fprintf(stdout,"connection established. data received from server:\n%d stations, mGroup IP: %s, mGroup port: %d. playing"
-				" station 0.",NumStations,udp_data.mGroup_IP,udp_data.mGroup_port);
+		fprintf(stdout,"\nconnection established. data received from server:\n%d stations, mGroup IP: %s, mGroup port: %d. playing"
+				" station 0.\n",NumStations,udp_data.mGroup_IP,udp_data.mGroup_port);
 	return udp_data; //return UDP socket info
 }
 
@@ -156,7 +156,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 		state = WAIT_WELCOME;
 	else if(retval ==0) //timeout reached.
 	{
-		printf("\nWELCOME msg not received within 0.2 seconds. quitting program.\n");
+		printf("\nWELCOME msg not received within 0.1 seconds. quitting program.\n");
 		state = OFF_INIT;
 		close (TCP_Sock);
 		exit(ERROR);
@@ -189,7 +189,7 @@ void* listener(void* UDP)
 {
 	UDP_sock_data udp_data = *(UDP_sock_data*)UDP; //get struct sent to thread.
 	struct ip_mreq mreq; //mCast request
-	int UDP_sock,UDP_pack_len =1, reuse = 1;
+	int UDP_sock,UDP_pack_len =1, reuse = 1,i=0;
 	struct sockaddr_in udp_serverAddr = {0};
 	char  message[Buffer_size];
 	FILE * fp; //to throw audio to
@@ -217,7 +217,7 @@ void* listener(void* UDP)
 	fp = popen("play -t mp3 -> /dev/null 2>&1", "w");//open a pipe. output is sent to dev/null (hell).
 
 	// Wait for socket to have data, Read socket data into buffer if there is Any data
-	while(state != OFF_INIT) // While (not all data received || connection closed by server)
+	while(state != OFF_INIT && i < 5) // While (not all data received || connection closed by server)
 	{
 		if(change_station)
 		{
@@ -235,7 +235,12 @@ void* listener(void* UDP)
 		if(UDP_pack_len > 0)
 			fwrite (message , sizeof(char), Buffer_size, fp); //write a buffer of size Buffer_size into fp >> play  the song!!
 		if (UDP_pack_len < 0)
-		{ perror("Error in reading from UDP socket"); printf("\n"); }
+		{
+ 		perror("Error in reading from UDP socket");
+		i++;
+		if(i == 5)
+			state = OFF_INIT;
+		}
 		else if (UDP_pack_len == 0)// - Connection closed by server
 		{
 			printf("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n~~~~UDP Connection closed by server.~~~~\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
@@ -427,12 +432,12 @@ int handle_TCP_message()
 		case 1: //announce msg
 			if(TCP_pack_len >=2 && state == WAIT_ANNOUNCE) //all good
 			{
-				printf("*****announce msg received!!");
+				printf("***** announce msg received!!");
 				arr_len = (uint8_t)buffer[1]; //length of song received
 				arr = (char*)calloc(arr_len, sizeof(char));
 				for(i=0;i<arr_len;i++) //fill song name to arr.
 					arr[i] = buffer[i+2];
-				printf(" changed station's song name: %s.*****",arr); //present new song
+				printf(" changed station's song name: %s. *****\n",arr); //present new song
 				change_station = 1; //change staion in listener thread
 				state = ESTABLISHED;
 				free(arr);
@@ -443,12 +448,12 @@ int handle_TCP_message()
 		case 2: //PermitSong msg
 			if(TCP_pack_len == 2 && state == WAIT_PERMIT) //all good
 			{
-				printf("*****PermitSong msg received!! ");
+				printf("***** PermitSong msg received!! ");
 				permit = (uint8_t)buffer[1];
 				if(permit == 1)
 				{
 					state = UPLOAD_SONG;
-					printf("permitted to upload!!\nuploading.. (no I/O currently possible).*****\n");
+					printf("permitted to upload!!\nuploading.. (no I/O currently possible). *****\n");
 					uploading = 1; //flag not to disable IO
 					if(uploadSong(TCP_Sock) == 1) //uploaded successfully
 					{
@@ -465,7 +470,7 @@ int handle_TCP_message()
 				}
 				else if(permit == 0)
 				{
-					printf("not permitted to upload =( try a different song.*****\n");
+					printf("not permitted to upload =( try a different song. *****\n");
 					return SUCCESS;
 				}
 			}
@@ -479,7 +484,7 @@ int handle_TCP_message()
 				arr = (char*)calloc(arr_len, sizeof(char)); //alloc msg size
 				for(i=0;i<arr_len;i++) //fill invalid msg to arr
 					arr[i] = buffer[i+2];
-				printf("*****invalidCommand msg recieved:\n ""%s"". quitting program.*****\n",arr);
+				printf("***** invalidCommand msg recieved:\n ""%s"". quitting program. *****\n",arr);
 				state = OFF_INIT;
 				free(arr);
 				return ERROR;
@@ -490,7 +495,7 @@ int handle_TCP_message()
 			if(TCP_pack_len == 3)
 			{
 				NumStations = ntohs(((uint16_t*)(buffer+1))[0]);
-				printf("*****newstations!!! we now offer %d stations!*****\n",NumStations);
+				printf("***** newstations!!! we now offer %d stations! *****\n",NumStations);
 				state = ESTABLISHED;
 			}
 			else { printf("invalid NewStations msg recieved. quitting program.\n"); state = OFF_INIT; return ERROR; }
@@ -627,3 +632,4 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 	printf("\nError in uploading song, couldn't reach end of file."); //newstations wasn't received.
 	return ERROR; //newstations wasn't received.
 }
+
