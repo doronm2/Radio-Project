@@ -41,7 +41,7 @@ struct TCP_DATA{
 	int socket;
 	int client_index;
 	char *clientIP;
-	int song_alloc;
+	int close_flag;
 	int active;
 	int station_num;
 	pthread_t client_thread;
@@ -77,7 +77,7 @@ void* send_new_station(void* data);
 void* handle_station(void* data);
 int check_new_song(char* song_name,int song_len);
 int open_new_station(char* song_name);
-int download_song(char* song_name,ssize_t  song_len,int socket);
+int download_song(char* song_name,ssize_t  song_len,int socket_num);
 int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str);
 int initial_connection(struct TCP_DATA my_data);
 char* find_song(int channel);
@@ -115,7 +115,7 @@ int main(int argc, char* argv[])
 		Client_List[client_ind].active=0;
 		Client_List[client_ind].station_num=0;
 		Client_List[client_ind].clientIP=NULL;
-		Client_List[client_ind].song_alloc=0;
+		Client_List[client_ind].close_flag=0;
 	}
 	//init the client list
 	client_ind=0;
@@ -212,7 +212,6 @@ int main(int argc, char* argv[])
 				pV4Addr = (struct sockaddr_in*)&serverStorage;
 				ipAddr = pV4Addr->sin_addr;
 				Client_List[client_ind].clientIP=calloc(INET_ADDRSTRLEN, sizeof(char)); //TODO - fix leak
-				Client_List[client_ind].song_alloc=1;
 				inet_ntop( AF_INET, &ipAddr.s_addr,Client_List[client_ind].clientIP,INET_ADDRSTRLEN);
 				if(DEBUG_MODE==1)
 					printf("new Client IP %s\n",Client_List[client_ind].clientIP);
@@ -352,14 +351,15 @@ void* handle_station(void* data){
 int close_connections(struct UDP_DATA *root_station){
 	struct UDP_DATA *temp;
 	int Check,index=0;
+	struct timeval tv;
+	tv.tv_sec = 0; //to reset the sockets
+	tv.tv_usec = 0;
+
 	/********Close all tcp sockets and threads*********/
-	for(index=0;index<100;index++){
-		if(Client_List[index].active==1) {
-			if(Client_List[index].clientIP!=NULL && Client_List[index].song_alloc==1){
-				printf("ClientIP %d - %s\n",index,Client_List[index].clientIP);
-				free(Client_List[index].clientIP);
-				printf("ClientIP %d free'ed\n",index);
-			}
+	for(index=0;index<100;index++)
+		if(Client_List[index].close_flag==1){
+			setsockopt(Client_List[index].socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv,sizeof(struct timeval));
+			printf("closing socket %d\n",Client_List[index].client_index);
 			Check = pthread_join((pthread_t) Client_List[index].client_thread, NULL);
 			//wait for the threads to end
 			if (Check != 0) {
@@ -368,7 +368,6 @@ int close_connections(struct UDP_DATA *root_station){
 			}
 			Client_List[index].active=0;
 		}
-	}
 	index =0;
 	while(root_station->next!=NULL){
 		Check = pthread_join(root_station->station_thread, NULL);        //wait for the threads to end
@@ -407,16 +406,18 @@ void* handle_client(void* client_data_ind){
 	int index=(int)client_data_ind;
 	struct TCP_DATA my_data;
 	int i,msg_len,msg_err=0, Hello_flag=0,check_upload,check_song;
-	int optval=1, select_on=0;
-	fd_set rfds;
-	struct timeval tv;
+	int optval=1;
 	socklen_t optlen =sizeof(optval);
 	char buffer[Buffer_size+1],*song_name,*ending="mp3",*cmp_str;
 	uint8_t commandType = 0,song_name_len, buf32[4];
 	uint16_t client_data;
 	uint32_t song_size;
+	struct timeval tv;
+	fd_set rfds;
+	tv.tv_sec = 0; //to reset the sockets
+	tv.tv_usec = 0;
+
 	my_data.clientIP=(char*)calloc(strlen(Client_List[index].clientIP),sizeof(char));
-	my_data.song_alloc=1;
 	strcpy(my_data.clientIP,Client_List[index].clientIP);
 	my_data.client_index=index;
 	my_data.client_thread=Client_List[index].client_thread;
@@ -430,102 +431,112 @@ void* handle_client(void* client_data_ind){
 		Client_List[my_data.client_index].active=1;
 	}
 	setsockopt(my_data.socket,SOL_SOCKET,SO_KEEPALIVE,&optval,optlen);
+	Client_List[my_data.client_index].close_flag=1;
 	while(END_SERVER==0 && msg_err==0){
-		tv.tv_sec=0;
-		tv.tv_usec=10000;
 		FD_ZERO(&rfds);
 		FD_SET(my_data.socket, &rfds);
-		select(my_data.socket, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
-		select_on=FD_ISSET(my_data.socket, &rfds);
-		if(!select_on){
+		FD_SET(STDIN_FILENO, &rfds); //rfds[0] = STDIN_FILENO (0). set rfds
+		select(my_data.socket+1, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
+		if(FD_ISSET(my_data.socket, &rfds)){
 			msg_len= (int) recv(my_data.socket, buffer, Buffer_size , 0);
-			if (msg_len==0)
-				msg_err=1;
-		}
-		if(msg_len>0){
-			commandType=(uint8_t )buffer[0];
-			switch (commandType) {
-			case HELLO:
-				//send an invalid command to the client
-				send_message(my_data.socket, INVALID_MSG,33,"Multiple Hello Message received\0");
-				msg_err = 1;//there is a error with the message - close connection
-				break;
-			case ASKSONG:
-				client_data=(uint16_t )((buffer[1]<<8)+buffer[2]);
-				//check that an Hello message was received
-				if(Hello_flag==1){
-					//check that the client asked for a station that exist
-					if((client_data>=0 && client_data<NUM_OF_STATIONS)){
-						song_name=find_song(client_data);
-						send_message(my_data.socket,ANNOUNCE,strlen(song_name),song_name);
-						Client_List[my_data.client_index].station_num=client_data; //change station number
-						my_data.station_num=client_data; //change station number
+
+			if(msg_len>0){
+				commandType=(uint8_t )buffer[0];
+				switch (commandType) {
+				case HELLO:
+					//send an invalid command to the client
+					send_message(my_data.socket, INVALID_MSG,33,"Multiple Hello Message received\0");
+					msg_err = 1;//there is a error with the message - close connection
+					break;
+				case ASKSONG:
+					if(msg_len==3){
+						client_data=(uint16_t )((buffer[1]<<8)+buffer[2]);
+
+						//check that an Hello message was received
+						if(Hello_flag==1){
+							//check that the client asked for a station that exist
+							if((client_data>=0 && client_data<NUM_OF_STATIONS)){
+								song_name=find_song(client_data);
+								send_message(my_data.socket,ANNOUNCE,strlen(song_name),song_name);
+								Client_List[my_data.client_index].station_num=client_data; //change station number
+								my_data.station_num=client_data; //change station number
+							}
+							else {
+								//send an invalid command to the client
+								send_message(my_data.socket, INVALID_MSG,46,"Client asked for a station hat doesn't exist\0");
+								msg_err = 1;//there is a error with the message - close connection
+							}
+						}
+						else {
+							//send an invalid command to the client
+							send_message(my_data.socket, INVALID_MSG,31,"Hello Message wasn't received\0");
+							msg_err = 1;//there is a error with the message - close connection
+						}
 					}
 					else {
 						//send an invalid command to the client
-						send_message(my_data.socket, INVALID_MSG,46,"Client asked for a station hat doesn't exist\0");
+						send_message(my_data.socket, INVALID_MSG,20,"Incomplete message\0");
 						msg_err = 1;//there is a error with the message - close connection
 					}
-				}
-				else {
-					//send an invalid command to the client
-					send_message(my_data.socket, INVALID_MSG,31,"Hello Message wasn't received\0");
-					msg_err = 1;//there is a error with the message - close connection
-				}
 
-				break;
-			case UPSONG:
-				for(i=0;i<4;i++)
-					buf32[i]=buffer[1+i];
-				song_size=ntohl(*(uint32_t*)buf32);
-				//if the song size is not as permitted
-				if(!(song_size>=MIN_SONG_SIZE && song_size<=MAX_SONG_SIZE)) {
-					//send an invalid command to the client
-					send_message(my_data.socket, INVALID_MSG,28,"Song size isn't perrmitted\0");
-					msg_err = 1;//there is a error with the message - close connection
-				}
-				else {
-					song_name_len = (uint8_t) buffer[5];
-					song_name = (char *)calloc(song_name_len ,sizeof(char));
-					i = 0;
-					for (i = 0; i < song_name_len; i++)
-						song_name[i] = buffer[6 + i]; //copy the song name to the song name buffer
-					cmp_str=strstr(song_name,ending); //check that the name has "mp3" in it
-					if(cmp_str==NULL){
+					break;
+				case UPSONG:
+					for(i=0;i<4;i++)
+						buf32[i]=buffer[1+i];
+					song_size=ntohl(*(uint32_t*)buf32);
+					//if the song size is not as permitted
+					if(!(song_size>=MIN_SONG_SIZE && song_size<=MAX_SONG_SIZE)) {
 						//send an invalid command to the client
-						send_message(my_data.socket, INVALID_MSG,22,"Song name isn't .mp3\0");
+						send_message(my_data.socket, INVALID_MSG,28,"Song size isn't perrmitted\0");
 						msg_err = 1;//there is a error with the message - close connection
 					}
-					else{
-						check_song=check_new_song(song_name,song_name_len); //check that the song isn't playing already
-						if (check_song == 0) {
-							if(DOWNLOAD_SONG==0){
-								send_message(my_data.socket, PERMIT,1,NULL); //permit the client to upload the song
-								//upload the song to the server
-								check_upload = download_song(song_name, song_size, my_data.socket);
-								if (check_upload == -1) {
-									send_message(my_data.socket, INVALID_MSG, 28, "Problem Uploading song\0");
-									msg_err = 1;
-								}
-								else
-									open_new_station(song_name);
-							}
-							else
-								send_message(my_data.socket, PERMIT, 0, NULL);
+					else {
+						song_name_len = (uint8_t) buffer[5];
+						song_name = (char *)calloc(song_name_len ,sizeof(char));
+						i = 0;
+						for (i = 0; i < song_name_len; i++)
+							song_name[i] = buffer[6 + i]; //copy the song name to the song name buffer
+						cmp_str=strstr(song_name,ending); //check that the name has "mp3" in it
+						if(cmp_str==NULL){
+							//send an invalid command to the client
+							send_message(my_data.socket, INVALID_MSG,22,"Song name isn't .mp3\0");
+							msg_err = 1;//there is a error with the message - close connection
 						}
 						else{
-							send_message(my_data.socket, PERMIT, 0, NULL);
+							check_song=check_new_song(song_name,song_name_len); //check that the song isn't playing already
+							if (check_song == 0) {
+								if(DOWNLOAD_SONG==0){
+									send_message(my_data.socket, PERMIT,1,NULL); //permit the client to upload the song
+									//upload the song to the server
+									check_upload = download_song(song_name, song_size, my_data.socket);
+									if (check_upload == -1) {
+										send_message(my_data.socket, INVALID_MSG, 28, "Problem Uploading song\0");
+										msg_err = 1;
+									}
+									else
+										open_new_station(song_name);
+								}
+								else
+									send_message(my_data.socket, PERMIT, 0, NULL);
+							}
+							else{
+								send_message(my_data.socket, PERMIT, 0, NULL);
+							}
 						}
+						free(song_name);
 					}
-					free(song_name);
-				}
 
-				break;
-			default: //if any other CommandType except 0,1,2 is receive, send a INVALID message
-				//send an invalid command to the client
-				send_message(my_data.socket, INVALID_MSG,28,"Wrong CommandType received\0");
-				msg_err = 1;//there is a error with the message - close connection
-				break;
+					break;
+				default: //if any other CommandType except 0,1,2 is receive, send a INVALID message
+					//send an invalid command to the client
+					send_message(my_data.socket, INVALID_MSG,28,"Wrong CommandType received\0");
+					msg_err = 1;//there is a error with the message - close connection
+					break;
+				}
+			}
+			else if (msg_len==0){
+				if(tv.tv_sec==0 && tv.tv_usec==0)
+					msg_err=1;
 			}
 		}
 
@@ -534,13 +545,13 @@ void* handle_client(void* client_data_ind){
 		perror("failed to close Client Socket");
 		pthread_exit(&(my_data.client_thread));
 	}
-	if(my_data.clientIP!=NULL && my_data.song_alloc==1){
-		printf("Trying to free Client %d, IP - %s\n",my_data.client_index,my_data.clientIP);
+	if(my_data.clientIP!=NULL){
 		free(my_data.clientIP);
-		printf("Client %d IP free'ed\n",my_data.client_index);
+		free(Client_List[my_data.client_index].clientIP);
+		printf("ClientIP %d free'ed\n",my_data.client_index);
+
 	}
 	Client_List[my_data.client_index].active=0; //mark as inactive
-	printf("Client %d is closed\n",my_data.client_index);
 
 	pthread_exit(&(my_data.client_thread));
 
@@ -560,7 +571,7 @@ int initial_connection(struct TCP_DATA my_data){
 	select(my_data.socket+1, &rfds, NULL, NULL, &tv); // Watch stdin and tcp_sock to see when it has input.
 	if(FD_ISSET(my_data.socket,&rfds))
 		msg_len= (int) recv(my_data.socket, buffer, Buffer_size , 0);
-	if(msg_len>0){
+	if(msg_len==3){
 		commandType=(uint8_t )buffer[0];
 		if(commandType==0){
 			client_data=(uint16_t )((buffer[1]<<8)+buffer[2]);
@@ -571,6 +582,7 @@ int initial_connection(struct TCP_DATA my_data){
 			else {
 				//send an invalid command to the client
 				send_message(my_data.socket, INVALID_MSG,22,"wrong reserved Value\0");
+
 				Hello_flag = -1;//there is a error with the message - close connection
 			}
 		}
@@ -582,6 +594,7 @@ int initial_connection(struct TCP_DATA my_data){
 	}
 	return Hello_flag;
 }
+
 void* send_new_station(void* data){
 	struct UDP_DATA *my_data=(struct UDP_DATA *)data;
 	int i;
@@ -713,7 +726,7 @@ int send_message(int socket,SERVER_RESPONSE ans,int str_len,char* reply_str){
  * 3.the upload size is not as given in song_len
  * 4.other Client is Uploading a song
  */
-int download_song(char* song_name,ssize_t song_len,int socket){
+int download_song(char* song_name,ssize_t song_len,int socket_num){
 	ssize_t checkUp=1,packet_ctr=0,count_size=0;
 	FILE* song_fd;
 	int ret=0;
@@ -722,7 +735,7 @@ int download_song(char* song_name,ssize_t song_len,int socket){
 	tv.tv_sec = 3; //3 seconds timeout as defined
 	tv.tv_usec = 0;
 	//set timeout for upload at 3 seconds
-	setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv,sizeof(struct timeval));
+	setsockopt(socket_num, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv,sizeof(struct timeval));
 	song_fd=fopen(song_name,"w+"); //open the *mp3 file to write to
 	if(song_fd<0){
 		perror("failed to open the FILE");
@@ -742,7 +755,7 @@ int download_song(char* song_name,ssize_t song_len,int socket){
 	printf("Starting song Download - %s\n",song_name);
 	//start receiving the song from the Client
 	while(checkUp>0) {
-		if((checkUp=recv(socket,buffer, sizeof(buffer),0))>0){
+		if((checkUp=recv(socket_num,buffer, sizeof(buffer),0))>0){
 			count_size+=checkUp;
 			packet_ctr++;
 			fwrite(buffer,sizeof(char),checkUp,song_fd);//write the song to the file
@@ -852,7 +865,7 @@ void print_server_data(){
 		printf("\n### Station %d is playing on Multicast %s\nSong playing %s\n"
 				,i,inet_ntoa(temp->ip_address),temp->song_name);
 	}
-	printf("Connected Client list/n");
+	printf("Connected Client list\n");
 	for(i=0;i<100;i++) {
 		if (Client_List[i].active == 1)
 			printf("-Client %d with ip address: %s\n",Client_List[i].client_index
@@ -886,4 +899,5 @@ void print_clients_station() {
 }
 
 #endif
+
 
