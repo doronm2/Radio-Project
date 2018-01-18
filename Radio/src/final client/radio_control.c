@@ -145,7 +145,7 @@ UDP_sock_data handShake() //perform handshake and get mCast data.
 	FD_ZERO(&rfds);
 	FD_SET(TCP_Sock, &rfds);
 	tv.tv_sec = 0; // set timeouts -wait for 0.1 sec for the WELCOME MSG
-	tv.tv_usec = 100000;
+	tv.tv_usec = 150000;
 
 	if(send(TCP_Sock,hello_msg,sizeof(hello_msg),0) == -1)
 	{ perror(""); printf("\nError in sending hello message"); return welc_msg;} //returning empty struct
@@ -236,10 +236,10 @@ void* listener(void* UDP)
 			fwrite (message , sizeof(char), Buffer_size, fp); //write a buffer of size Buffer_size into fp >> play  the song!!
 		if (UDP_pack_len < 0)
 		{
- 		perror("Error in reading from UDP socket");
-		i++;
-		if(i == 5)
-			state = OFF_INIT;
+			perror("Error in reading from UDP socket");
+			i++;
+			if(i == 5)
+				state = OFF_INIT;
 		}
 		else if (UDP_pack_len == 0)// - Connection closed by server
 		{
@@ -413,7 +413,7 @@ int handle_user_input()
 
 int handle_TCP_message()
 {
-	int TCP_pack_len=0, arr_len=0,i;
+	int TCP_pack_len=0, arr_len=0,i, err_flag = 0;
 	char *arr; //for invalid msg or announce msg
 	uint8_t replyType = 0,permit=0;
 	char buffer[Buffer_size];
@@ -434,16 +434,42 @@ int handle_TCP_message()
 			{
 				printf("***** announce msg received!!");
 				arr_len = (uint8_t)buffer[1]; //length of song received
-				arr = (char*)calloc(arr_len, sizeof(char));
-				for(i=0;i<arr_len;i++) //fill song name to arr.
-					arr[i] = buffer[i+2];
-				printf(" changed station's song name: %s. *****\n",arr); //present new song
-				change_station = 1; //change staion in listener thread
-				state = ESTABLISHED;
-				free(arr);
-				return SUCCESS;
+				if (arr_len > 0)
+				{
+					arr = (char*)calloc(arr_len, sizeof(char));
+					for(i=0;i<arr_len;i++) //fill song name to arr.
+					{
+						if(buffer[i+2] != '\0')
+							arr[i] = buffer[i+2];
+						else
+						{
+							err_flag = 1;
+							break;
+						}
+					}
+					if(err_flag == 0)
+					{
+					printf(" changed station's song name: %s. *****\n",arr); //present new song
+					change_station = 1; //change staion in listener thread
+					state = ESTABLISHED;
+					free(arr);
+					return SUCCESS;
+					}
+					else
+					{
+						printf(" faulty song name. quitting program.\n");
+						state = OFF_INIT;
+						return ERROR;
+					}
+				}
+				else
+				{
+					printf("announce msg received with song name size == 0. quitting program.\n");
+					state = OFF_INIT;
+					return ERROR;
+				}
 			}
-			else { state = OFF_INIT; return ERROR; } //quit
+			else { printf ("unwanted announce msg received. quitting program.\n"); state = OFF_INIT; return ERROR; } //quit
 
 		case 2: //PermitSong msg
 			if(TCP_pack_len == 2 && state == WAIT_PERMIT) //all good
@@ -474,7 +500,7 @@ int handle_TCP_message()
 					return SUCCESS;
 				}
 			}
-			else return ERROR;
+			else { printf ("unwanted PermitSong msg received. quitting program.\n"); state = OFF_INIT; return ERROR; }
 			break;
 
 		case 3: //Invalid_command msg
@@ -632,4 +658,3 @@ int uploadSong() //UPLOAD THE SONG!!!!!!!!!
 	printf("\nError in uploading song, couldn't reach end of file."); //newstations wasn't received.
 	return ERROR; //newstations wasn't received.
 }
-
